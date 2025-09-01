@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
+import { useAdmin } from '../../contexts/AdminContext';
 
 interface Department {
   id: string;
@@ -20,11 +21,20 @@ interface User {
   is_active: boolean;
   created_at: string;
   departments?: Department[];
+  user_departments?: Array<{
+    user_id: string;
+    department_id: string;
+    departments: {
+      id: string;
+      name: string;
+    };
+  }>;
 }
 
 interface OrganizationProps {}
 
 const Organization: React.FC<OrganizationProps> = () => {
+  const { createUser } = useAdmin();
   const [activeTab, setActiveTab] = useState<'departments' | 'users'>('departments');
   const [departments, setDepartments] = useState<Department[]>([]);
   const [users, setUsers] = useState<User[]>([]);
@@ -34,6 +44,10 @@ const Organization: React.FC<OrganizationProps> = () => {
   const [editingUser, setEditingUser] = useState<any>(null);
   const [editingDepartment, setEditingDepartment] = useState<any>(null);
   const [showUserActions, setShowUserActions] = useState<string | null>(null);
+  const [tempPassword, setTempPassword] = useState<string>('');
+  const [showTempPassword, setShowTempPassword] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [userToDelete, setUserToDelete] = useState<any>(null);
 
   // Department form state
   const [newDepartment, setNewDepartment] = useState({
@@ -50,7 +64,7 @@ const Organization: React.FC<OrganizationProps> = () => {
     full_name: '',
     email: '',
     job_title: '',
-    department_ids: [] as string[]
+    selectedDepartments: [] as string[]
   });
 
   useEffect(() => {
@@ -155,95 +169,74 @@ const Organization: React.FC<OrganizationProps> = () => {
 
   const handleAddUser = async (e: React.FormEvent) => {
     e.preventDefault();
+    
     try {
-      // First ensure we have a test organization
-      const { data: orgData, error: orgError } = await supabase
+      // First ensure we have a default organization
+      let organizationId = '550e8400-e29b-41d4-a716-446655440000';
+      
+      const { data: orgCheck, error: orgCheckError } = await supabase
         .from('organizations')
         .select('id')
-        .eq('id', '00000000-0000-0000-0000-000000000000')
+        .eq('id', organizationId)
         .single();
-
-      if (orgError && orgError.code === 'PGRST116') {
+      
+      if (orgCheckError && orgCheckError.code === 'PGRST116') {
         // Organization doesn't exist, create it
-        const { error: createOrgError } = await supabase
+        const { data: newOrg, error: createOrgError } = await supabase
           .from('organizations')
           .insert([{
-            id: '00000000-0000-0000-0000-000000000000',
-            name: 'Test Organization',
-            subdomain: 'test-org'
-          }]);
-
-        if (createOrgError) throw createOrgError;
-      }
-
-      // Insert or update user
-      let userData;
-      if (editingUser) {
-        const { data, error: updateError } = await supabase
-          .from('users')
-          .update({
-            full_name: newUser.full_name,
-            email: newUser.email,
-            job_title: newUser.job_title
-          })
-          .eq('id', editingUser.id)
-          .select()
-          .single();
-        
-        if (updateError) throw updateError;
-        userData = data;
-      } else {
-        const { data, error: userError } = await supabase
-          .from('users')
-          .insert([{
-            organization_id: '00000000-0000-0000-0000-000000000000',
-            full_name: newUser.full_name,
-            email: newUser.email,
-            job_title: newUser.job_title
+            id: organizationId,
+            name: 'Default Organization',
+            subdomain: 'default-org',
+            settings: { description: 'Default organization for user management' }
           }])
           .select()
           .single();
-        
-        if (userError) throw userError;
-        userData = data;
-      }
-
-      // Handle user-department mappings
-      if (editingUser) {
-        // Delete existing mappings
-        await supabase
-          .from('user_departments')
-          .delete()
-          .eq('user_id', userData.id);
+          
+        if (createOrgError) {
+          console.error('Failed to create organization:', createOrgError);
+          alert('Failed to create organization. Please try again.');
+          return;
+        }
       }
       
-      // Insert new user-department mappings
-      if (newUser.department_ids.length > 0) {
-        const userDepartments = newUser.department_ids.map((deptId, index) => ({
-          user_id: userData.id,
-          department_id: deptId,
-          is_primary_department: index === 0 // First department is primary
-        }));
+      const userData = {
+        email: newUser.email,
+        fullName: newUser.full_name,
+        jobTitle: newUser.job_title,
+        organizationId: organizationId,
+        departmentId: newUser.selectedDepartments[0], // Use first selected department
+        role: 'user' as const
+      };
 
-        const { error: mappingError } = await supabase
-          .from('user_departments')
-          .insert(userDepartments);
+      const result = await createUser(userData);
 
-        if (mappingError) throw mappingError;
+      if (result.user && !result.error) {
+        console.log('User created successfully, showing temp password:', result.tempPassword);
+        
+        // Set temp password and show modal immediately
+        setTempPassword(result.tempPassword || '');
+        setShowAddUser(false); // Close the add user form first
+        
+        // Wait a moment for form to close, then show temp password modal
+        setTimeout(() => {
+          setShowTempPassword(true);
+        }, 200);
+        
+        await loadUsers();
+        setNewUser({
+          full_name: '',
+          email: '',
+          job_title: '',
+          selectedDepartments: []
+        });
+      } else {
+        console.error('Error creating user:', result.error);
+        alert('Error creating user: ' + (result.error?.message || result.error));
       }
-
-      setNewUser({
-        full_name: '',
-        email: '',
-        job_title: '',
-        department_ids: []
-      });
-      setEditingUser(null);
-      setShowAddUser(false);
-      loadUsers();
     } catch (error) {
       console.error('Error adding user:', error);
-      alert('Failed to add user. Please check the console for details.');
+      alert('Error adding user');
     }
   };
 
@@ -297,7 +290,7 @@ const Organization: React.FC<OrganizationProps> = () => {
       full_name: user.full_name,
       email: user.email,
       job_title: user.job_title,
-      department_ids: [] // Will be populated from user_departments
+      selectedDepartments: [] // Will be populated from user_departments
     });
     setShowAddUser(true);
   };
@@ -317,29 +310,37 @@ const Organization: React.FC<OrganizationProps> = () => {
     }
   };
 
-  const handleDeleteUser = async (user: any) => {
-    if (window.confirm(`Are you sure you want to delete ${user.full_name}?`)) {
-      try {
-        // First delete user-department mappings
-        const { error: mappingError } = await supabase
-          .from('user_departments')
-          .delete()
-          .eq('user_id', user.id);
-        
-        if (mappingError) throw mappingError;
-        
-        // Then delete the user
-        const { error } = await supabase
-          .from('users')
-          .delete()
-          .eq('id', user.id);
-        
-        if (error) throw error;
-        loadUsers();
-      } catch (error) {
-        console.error('Error deleting user:', error);
-        alert('Failed to delete user. Please check the console for details.');
-      }
+  const handleDeleteUser = (user: any) => {
+    setUserToDelete(user);
+    setShowDeleteModal(true);
+  };
+
+  const confirmDeleteUser = async () => {
+    if (!userToDelete) return;
+    
+    try {
+      // First delete user-department mappings
+      const { error: mappingError } = await supabase
+        .from('user_departments')
+        .delete()
+        .eq('user_id', userToDelete.id);
+      
+      if (mappingError) throw mappingError;
+      
+      // Then delete the user
+      const { error } = await supabase
+        .from('users')
+        .delete()
+        .eq('id', userToDelete.id);
+      
+      if (error) throw error;
+      
+      setShowDeleteModal(false);
+      setUserToDelete(null);
+      loadUsers();
+    } catch (error) {
+      console.error('Error deleting user:', error);
+      alert('Failed to delete user. Please check the console for details.');
     }
   };
 
@@ -532,7 +533,15 @@ const Organization: React.FC<OrganizationProps> = () => {
                         <td>{user.job_title}</td>
                         <td>
                           <div className="flex flex-wrap gap-1">
-                            <span className="rg-badge rg-badge-medium text-xs">Department info needed</span>
+                            {user.user_departments && user.user_departments.length > 0 ? (
+                              user.user_departments.map((ud: any) => (
+                                <span key={ud.department_id} className="rg-badge rg-badge-info text-xs">
+                                  {ud.departments?.name || 'Unknown Dept'}
+                                </span>
+                              ))
+                            ) : (
+                              <span className="rg-badge rg-badge-secondary text-xs">No departments</span>
+                            )}
                           </div>
                         </td>
                         <td>
@@ -762,10 +771,10 @@ const Organization: React.FC<OrganizationProps> = () => {
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Primary Department</label>
                   <select
-                    value={newUser.department_ids[0] || ''}
+                    value={newUser.selectedDepartments[0] || ''}
                     onChange={(e) => setNewUser({
                       ...newUser,
-                      department_ids: e.target.value ? [e.target.value] : []
+                      selectedDepartments: e.target.value ? [e.target.value] : []
                     })}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
                     required
@@ -791,7 +800,7 @@ const Organization: React.FC<OrganizationProps> = () => {
                       full_name: '',
                       email: '',
                       job_title: '',
-                      department_ids: []
+                      selectedDepartments: []
                     });
                   }}
                   className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
@@ -806,6 +815,113 @@ const Organization: React.FC<OrganizationProps> = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Temporary Password Display Modal */}
+      {showTempPassword && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-medium text-gray-900">User Created Successfully</h3>
+              <button
+                onClick={() => {
+                  setShowTempPassword(false);
+                  setTempPassword('');
+                  setShowAddUser(false);
+                }}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                ✕
+              </button>
+            </div>
+            
+            <div className="mb-4">
+              <p className="text-sm text-gray-600 mb-3">
+                The user has been created successfully. Please share the following temporary password securely:
+              </p>
+              
+              <div className="bg-gray-50 p-3 rounded-md border">
+                <label className="block text-sm font-medium text-gray-700 mb-1">Temporary Password:</label>
+                <code className="text-lg font-mono bg-white px-2 py-1 border rounded text-red-600 select-all">
+                  {tempPassword}
+                </code>
+              </div>
+              
+              <p className="text-xs text-amber-600 mt-2">
+                ⚠️ The user must change this password on first login for security.
+              </p>
+            </div>
+
+            <div className="flex justify-end space-x-3">
+              <button
+                onClick={() => navigator.clipboard.writeText(tempPassword)}
+                className="px-3 py-2 text-sm font-medium text-gray-700 bg-gray-100 border border-gray-300 rounded-md hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+              >
+                Copy Password
+              </button>
+              <button
+                onClick={() => {
+                  setShowTempPassword(false);
+                  setTempPassword('');
+                  setShowAddUser(false);
+                }}
+                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete User Confirmation Modal */}
+      {showDeleteModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-medium text-gray-900">Confirm Delete</h3>
+              <button
+                onClick={() => {
+                  setShowDeleteModal(false);
+                  setUserToDelete(null);
+                }}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                ✕
+              </button>
+            </div>
+            
+            <div className="mb-6">
+              <p className="text-sm text-gray-600">
+                Are you sure you want to delete <strong>{userToDelete?.full_name}</strong>? 
+                This action cannot be undone and will remove:
+              </p>
+              <ul className="mt-3 text-sm text-gray-500 list-disc list-inside">
+                <li>User profile and account</li>
+                <li>Department assignments</li>
+                <li>Access permissions</li>
+              </ul>
+            </div>
+
+            <div className="flex justify-end space-x-3">
+              <button
+                onClick={() => {
+                  setShowDeleteModal(false);
+                  setUserToDelete(null);
+                }}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDeleteUser}
+                className="px-4 py-2 text-sm font-medium text-white bg-red-600 border border-transparent rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
+              >
+                Delete User
+              </button>
+            </div>
           </div>
         </div>
       )}

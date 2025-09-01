@@ -1,17 +1,56 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from './lib/supabase';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { AdminProvider } from './contexts/AdminContext';
+import { Auth } from './components/Auth/Auth';
+import { PasswordChange } from './components/Auth/PasswordChange';
 import RiskMatrix from './components/RiskMatrix/RiskMatrix';
 import RiskRegister from './components/RiskRegister/RiskRegister';
 import RiskAssessmentProjects from './components/RiskAssessmentProjects/RiskAssessmentProjects';
 import Organization from './components/Organization/Organization';
 import './styles/corporate-theme.css';
 
-const App: React.FC = () => {
+const AppContent: React.FC = () => {
+  const { user, loading, requiresPasswordChange, checkPasswordChangeRequirement, signOut } = useAuth();
+
+  // ALL useState hooks MUST be declared before any conditional logic or early returns
   const [currentView, setCurrentView] = useState<'dashboard' | 'risk-register' | 'risk-assessment' | 'reports' | 'settings' | 'risk-projects' | 'organization'>('dashboard');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<'connected' | 'connecting' | 'error'>('connecting');
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [selectedProjectName, setSelectedProjectName] = useState<string | null>(null);
+  
+  // Risk Register State hooks moved from below
+  const [showColumnModal, setShowColumnModal] = useState(false);
+  const [showRiskForm, setShowRiskForm] = useState(false);
+  const [editingRisk, setEditingRisk] = useState<any>(null);
+  const [newColumnName, setNewColumnName] = useState('');
+  const [newColumnType, setNewColumnType] = useState<'text' | 'textarea' | 'select' | 'number' | 'date'>('text');
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <Auth />;
+  }
+
+  if (requiresPasswordChange) {
+    return (
+      <PasswordChange 
+        onPasswordChanged={() => {
+          checkPasswordChangeRequirement();
+        }} 
+      />
+    );
+  }
 
   const handleNavigate = (view: string) => {
     setCurrentView(view as 'dashboard' | 'risk-register' | 'risk-assessment' | 'reports' | 'settings' | 'risk-projects' | 'organization');
@@ -23,13 +62,8 @@ const App: React.FC = () => {
     setCurrentView('risk-register');
   };
 
-  // Risk Register State
+  // Risk Register State (hooks moved to top of function)
   type ColumnType = 'text' | 'textarea' | 'select' | 'number' | 'date';
-  const [showColumnModal, setShowColumnModal] = useState(false);
-  const [showRiskForm, setShowRiskForm] = useState(false);
-  const [editingRisk, setEditingRisk] = useState<any>(null);
-  const [newColumnName, setNewColumnName] = useState('');
-  const [newColumnType, setNewColumnType] = useState<ColumnType>('text');
 
   const risks = [
     {
@@ -162,6 +196,25 @@ const App: React.FC = () => {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
             </svg>
             Settings
+          </button>
+          
+          <div className="px-3 mt-8 mb-4">
+            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Account</p>
+          </div>
+          
+          <div className="px-4 py-3">
+            <p className="text-xs text-slate-400 mb-2">Signed in as:</p>
+            <p className="text-sm text-white font-medium truncate">{user?.email}</p>
+          </div>
+          
+          <button 
+            onClick={() => signOut()}
+            className="rg-nav-item w-full flex items-center px-4 py-3 text-sm font-medium hover:bg-red-600/10 text-red-400 hover:text-red-300"
+          >
+            <svg className="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+            </svg>
+            Sign Out
           </button>
         </div>
       </nav>
@@ -362,6 +415,16 @@ const App: React.FC = () => {
         </div>
       );
   }
-}
+};
+
+const App: React.FC = () => {
+  return (
+    <AuthProvider>
+      <AdminProvider>
+        <AppContent />
+      </AdminProvider>
+    </AuthProvider>
+  );
+};
 
 export default App;
