@@ -1,0 +1,418 @@
+/* RiskGuard Corporate Theme - Modern Risk Management Design System */
+/* Professional color scheme optimized for enterprise risk management */
+
+:root {
+  /* Corporate Primary Colors - Deep Blues for Trust & Security */
+  --rg-primary: #1e3a8a;        /* Deep corporate blue */
+  --rg-primary-light: #3b82f6;  /* Lighter blue for accents */
+  --rg-primary-dark: #1e40af;   /* Darker blue for depth */
+  
+  /* Risk-Specific Color Palette */
+  --rg-critical: #dc2626;       /* Critical risk red */
+  --rg-high: #ea580c;          /* High risk orange */
+  --rg-medium: #d97706;        /* Medium risk amber */
+  --rg-low: #059669;           /* Low risk green */
+  --rg-minimal: #10b981;       /* Minimal risk emerald */
+  
+  /* Corporate Neutrals */
+  --rg-slate-50: #f8fafc;
+  --rg-slate-100: #f1f5f9;
+  --rg-slate-200: #e2e8f0;
+  --rg-slate-300: #cbd5e1;
+  --rg-slate-400: #94a3b8;
+  --rg-slate-500: #64748b;
+  --rg-slate-600: #475569;
+  --rg-slate-700: #334155;
+  --rg-slate-800: #1e293b;
+  --rg-slate-900: #0f172a;
+
+  /* AdminLTE Sidebar Colors */
+  --adminlte-sidebar-dark: #343a40;
+  --adminlte-sidebar-dark-hover: #495057;
+  --adminlte-sidebar-light: #f4f4f4;
+  --adminlte-sidebar-brand: #007bff;
+
+  /* AdminLTE Content Colors */
+  --adminlte-content-bg: #f4f4f4;
+  --adminlte-card-bg: #ffffff;
+  --adminlte-border-color: #dee2e6;
+  --adminlte-text-primary: #495057;
+  --adminlte-text-secondary: #6c757d;
+  --adminlte-text-muted: #868e96;
+
+  /* AdminLTE Header Colors */
+  --adminlte-navbar-bg: #ffffff;
+  --adminlte-navbar-border: #dee2e6;
+
+  /* AdminLTE Button Colors */
+  --adminlte-btn-primary: #007bff;
+  --adminlte-btn-primary-hover: #0056b3;
+  --adminlte-btn-secondary: #6c757d;
+  --adminlte-btn-success: #28a745;
+  --adminlte-btn-info: #17a2b8;
+  --adminlte-btn-warning: #ffc107;
+  --adminlte-btn-danger: #dc3545;
+
+  /* AdminLTE Status Colors */
+  --adminlte-status-open: #dc3545;
+  --adminlte-status-progress: #007bff;
+  --adminlte-status-monitoring: #ffc107;
+  --adminlte-status-closed: #28a745;
+
+  /* AdminLTE Risk Level Colors */
+  --adminlte-risk-low: #28a745;
+  --adminlte-risk-medium: #ffc107;
+  --adminlte-risk-high: #fd7e14;
+  --adminlte-risk-critical: #dc3545;
+
+  /* AdminLTE Shadows */
+  --adminlte-shadow-sm: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+  --adminlte-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
+  --adminlte-shadow-lg: 0 1rem 3rem rgba(0, 0, 0, 0.175);
+
+  /* AdminLTE Border Radius */
+  --adminlte-border-radius: 0.25rem;
+  --adminlte-border-radius-lg: 0.5rem;
+}
+
+/* Global AdminLTE Body Styles */
+.adminlte-theme {
+  font-family: 'Source Sans Pro', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  background-color: var(--adminlte-content-bg);
+  color: var(--adminlte-text-primary);
+  line-height: 1.6;
+}
+
+/* AdminLTE Sidebar Styles */
+.adminlte-sidebar {
+  background-color: var(--adminlte-sidebar-dark);
+  border-right: 1px solid var(--adminlte-border-color);
+  box-shadow: var(--adminlte-shadow-sm);
+}
+
+.adminlte-sidebar-brand {
+  background-color: var(--adminlte-sidebar-brand);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.adminlte-sidebar-nav-item {
+  color: rgba(255, 255, 255, 0.8);
+  transition: all 0.3s ease;
+}
+
+.adminlte-sidebar-nav-item:hover {
+  background-color: var(--adminlte-sidebar-dark-hover);
+  color: white;
+}
+
+.adminlte-sidebar-nav-item.active {
+  background-color: var(--adminlte-primary);
+  color: white;
+}
+
+/* AdminLTE Header/Navbar Styles */
+.adminlte-navbar {
+  background-color: var(--adminlte-navbar-bg);
+  border-bottom: 1px solid var(--adminlte-navbar-border);
+  box-shadow: var(--adminlte-shadow-sm);
+}
+
+/* AdminLTE Card Styles */
+.adminlte-card {
+  background-color: var(--adminlte-card-bg);
+  border: 1px solid var(--adminlte-border-color);
+  border-radius: var(--adminlte-border-radius);
+  box-shadow: var(--adminlte-shadow-sm);
+  transition: box-shadow 0.15s ease-in-out;
+}
+
+.adminlte-card:hover {
+  box-shadow: var(--adminlte-shadow);
+}
+
+.adminlte-card-header {
+  background-color: transparent;
+  border-bottom: 1px solid var(--adminlte-border-color);
+  padding: 0.75rem 1.25rem;
+}
+
+.adminlte-card-body {
+  padding: 1.25rem;
+}
+
+/* AdminLTE Button Styles */
+.adminlte-btn {
+  border-radius: var(--adminlte-border-radius);
+  font-weight: 400;
+  text-align: center;
+  vertical-align: middle;
+  border: 1px solid transparent;
+  padding: 0.375rem 0.75rem;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  transition: color 0.15s ease-in-out, background-color 0.15s ease-in-out, border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+  cursor: pointer;
+}
+
+.adminlte-btn-primary {
+  background-color: var(--adminlte-btn-primary);
+  border-color: var(--adminlte-btn-primary);
+  color: white;
+}
+
+.adminlte-btn-primary:hover {
+  background-color: var(--adminlte-btn-primary-hover);
+  border-color: var(--adminlte-btn-primary-hover);
+}
+
+.adminlte-btn-secondary {
+  background-color: var(--adminlte-btn-secondary);
+  border-color: var(--adminlte-btn-secondary);
+  color: white;
+}
+
+.adminlte-btn-success {
+  background-color: var(--adminlte-btn-success);
+  border-color: var(--adminlte-btn-success);
+  color: white;
+}
+
+.adminlte-btn-info {
+  background-color: var(--adminlte-btn-info);
+  border-color: var(--adminlte-btn-info);
+  color: white;
+}
+
+.adminlte-btn-warning {
+  background-color: var(--adminlte-btn-warning);
+  border-color: var(--adminlte-btn-warning);
+  color: #212529;
+}
+
+.adminlte-btn-danger {
+  background-color: var(--adminlte-btn-danger);
+  border-color: var(--adminlte-btn-danger);
+  color: white;
+}
+
+.adminlte-btn-outline-primary {
+  color: var(--adminlte-btn-primary);
+  border-color: var(--adminlte-btn-primary);
+  background-color: transparent;
+}
+
+.adminlte-btn-outline-primary:hover {
+  background-color: var(--adminlte-btn-primary);
+  color: white;
+}
+
+/* AdminLTE Badge/Status Styles */
+.adminlte-badge {
+  display: inline-block;
+  padding: 0.25em 0.4em;
+  font-size: 75%;
+  font-weight: 700;
+  line-height: 1;
+  text-align: center;
+  white-space: nowrap;
+  vertical-align: baseline;
+  border-radius: var(--adminlte-border-radius);
+}
+
+.adminlte-badge-primary { background-color: var(--adminlte-primary); color: white; }
+.adminlte-badge-secondary { background-color: var(--adminlte-secondary); color: white; }
+.adminlte-badge-success { background-color: var(--adminlte-success); color: white; }
+.adminlte-badge-info { background-color: var(--adminlte-info); color: white; }
+.adminlte-badge-warning { background-color: var(--adminlte-warning); color: #212529; }
+.adminlte-badge-danger { background-color: var(--adminlte-danger); color: white; }
+
+/* AdminLTE Status-specific badges */
+.adminlte-status-open { background-color: rgba(220, 53, 69, 0.1); color: var(--adminlte-status-open); }
+.adminlte-status-progress { background-color: rgba(0, 123, 255, 0.1); color: var(--adminlte-status-progress); }
+.adminlte-status-monitoring { background-color: rgba(255, 193, 7, 0.1); color: #856404; }
+.adminlte-status-closed { background-color: rgba(40, 167, 69, 0.1); color: var(--adminlte-status-closed); }
+
+/* AdminLTE Risk Level badges */
+.adminlte-risk-low { background-color: rgba(40, 167, 69, 0.1); color: var(--adminlte-risk-low); }
+.adminlte-risk-medium { background-color: rgba(255, 193, 7, 0.1); color: #856404; }
+.adminlte-risk-high { background-color: rgba(253, 126, 20, 0.1); color: var(--adminlte-risk-high); }
+.adminlte-risk-critical { background-color: rgba(220, 53, 69, 0.1); color: var(--adminlte-risk-critical); }
+
+/* AdminLTE Table Styles */
+.adminlte-table {
+  width: 100%;
+  margin-bottom: 1rem;
+  color: var(--adminlte-text-primary);
+  background-color: transparent;
+}
+
+.adminlte-table th,
+.adminlte-table td {
+  padding: 0.75rem;
+  vertical-align: top;
+  border-top: 1px solid var(--adminlte-border-color);
+}
+
+.adminlte-table thead th {
+  vertical-align: bottom;
+  border-bottom: 2px solid var(--adminlte-border-color);
+  background-color: var(--adminlte-light);
+  color: var(--adminlte-text-secondary);
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 0.75rem;
+  letter-spacing: 0.05em;
+}
+
+.adminlte-table tbody tr:hover {
+  background-color: rgba(0, 0, 0, 0.025);
+}
+
+/* AdminLTE Form Styles */
+.adminlte-form-control {
+  display: block;
+  width: 100%;
+  padding: 0.375rem 0.75rem;
+  font-size: 0.875rem;
+  font-weight: 400;
+  line-height: 1.5;
+  color: var(--adminlte-text-primary);
+  background-color: #fff;
+  background-clip: padding-box;
+  border: 1px solid var(--adminlte-border-color);
+  border-radius: var(--adminlte-border-radius);
+  transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+}
+
+.adminlte-form-control:focus {
+  color: var(--adminlte-text-primary);
+  background-color: #fff;
+  border-color: rgba(0, 123, 255, 0.5);
+  outline: 0;
+  box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+}
+
+/* AdminLTE Modal Styles */
+.adminlte-modal-backdrop {
+  background-color: rgba(0, 0, 0, 0.5);
+}
+
+.adminlte-modal-content {
+  background-color: var(--adminlte-card-bg);
+  border: 1px solid var(--adminlte-border-color);
+  border-radius: var(--adminlte-border-radius-lg);
+  box-shadow: var(--adminlte-shadow-lg);
+}
+
+.adminlte-modal-header {
+  border-bottom: 1px solid var(--adminlte-border-color);
+  padding: 1rem 1.5rem;
+}
+
+.adminlte-modal-body {
+  padding: 1.5rem;
+}
+
+.adminlte-modal-footer {
+  border-top: 1px solid var(--adminlte-border-color);
+  padding: 1rem 1.5rem;
+}
+
+/* AdminLTE Toggle Switch Styles */
+.adminlte-toggle {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 24px;
+}
+
+.adminlte-toggle input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.adminlte-toggle-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #ccc;
+  transition: 0.4s;
+  border-radius: 24px;
+}
+
+.adminlte-toggle-slider:before {
+  position: absolute;
+  content: "";
+  height: 18px;
+  width: 18px;
+  left: 3px;
+  bottom: 3px;
+  background-color: white;
+  transition: 0.4s;
+  border-radius: 50%;
+}
+
+.adminlte-toggle input:checked + .adminlte-toggle-slider {
+  background-color: var(--adminlte-primary);
+}
+
+.adminlte-toggle input:checked + .adminlte-toggle-slider:before {
+  transform: translateX(20px);
+}
+
+/* AdminLTE Utility Classes */
+.adminlte-text-primary { color: var(--adminlte-primary) !important; }
+.adminlte-text-secondary { color: var(--adminlte-secondary) !important; }
+.adminlte-text-success { color: var(--adminlte-success) !important; }
+.adminlte-text-info { color: var(--adminlte-info) !important; }
+.adminlte-text-warning { color: var(--adminlte-warning) !important; }
+.adminlte-text-danger { color: var(--adminlte-danger) !important; }
+.adminlte-text-muted { color: var(--adminlte-text-muted) !important; }
+
+.adminlte-bg-primary { background-color: var(--adminlte-primary) !important; }
+.adminlte-bg-secondary { background-color: var(--adminlte-secondary) !important; }
+.adminlte-bg-success { background-color: var(--adminlte-success) !important; }
+.adminlte-bg-info { background-color: var(--adminlte-info) !important; }
+.adminlte-bg-warning { background-color: var(--adminlte-warning) !important; }
+.adminlte-bg-danger { background-color: var(--adminlte-danger) !important; }
+.adminlte-bg-light { background-color: var(--adminlte-light) !important; }
+.adminlte-bg-dark { background-color: var(--adminlte-dark) !important; }
+
+/* AdminLTE Responsive Utilities */
+@media (max-width: 768px) {
+  .adminlte-sidebar {
+    transform: translateX(-100%);
+    transition: transform 0.3s ease;
+  }
+  
+  .adminlte-sidebar.show {
+    transform: translateX(0);
+  }
+  
+  .adminlte-content {
+    margin-left: 0 !important;
+  }
+}
+
+/* AdminLTE Animation Classes */
+.adminlte-fade-in {
+  animation: adminlteFadeIn 0.3s ease-in;
+}
+
+@keyframes adminlteFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.adminlte-slide-in {
+  animation: adminlteSlideIn 0.3s ease-out;
+}
+
+@keyframes adminlteSlideIn {
+  from { transform: translateY(-10px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}

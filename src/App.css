@@ -1,0 +1,42 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom styles for Risk Management SaaS */
+.App {
+  @apply min-h-screen bg-gray-50;
+}
+
+/* Risk level color utilities */
+.risk-low {
+  @apply bg-green-100 text-green-800 border-green-200;
+}
+
+.risk-medium {
+  @apply bg-yellow-100 text-yellow-800 border-yellow-200;
+}
+
+.risk-high {
+  @apply bg-orange-100 text-orange-800 border-orange-200;
+}
+
+.risk-critical {
+  @apply bg-red-100 text-red-800 border-red-200;
+}
+
+/* Custom scrollbar */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  @apply bg-gray-100;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  @apply bg-gray-300 rounded-full;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  @apply bg-gray-400;
+}
