@@ -1,5 +1,6 @@
-import React, { createContext, useContext } from 'react';
+import React, { createContext, useContext, useState } from 'react';
 import { supabase } from '../lib/supabase';
+import { assignUserToDepartment } from '../utils/departmentManager';
 import { useAuth } from './AuthContext';
 
 interface AdminContextType {
@@ -14,7 +15,7 @@ interface CreateUserData {
   fullName: string;
   jobTitle?: string;
   organizationId: string;
-  departmentId?: string;
+  departmentNames?: string[]; // Changed from departmentId to departmentNames array
   role: 'admin' | 'manager' | 'user' | 'read_only';
 }
 
@@ -131,20 +132,31 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         return { error: profileError };
       }
 
-      // Assign user to department if specified
-      if (userData.departmentId && profileUser) {
-        const { error: deptError } = await supabase
-          .from('user_departments')
-          .insert([
-            {
-              user_id: profileUser.id,
-              department_id: userData.departmentId
-            }
-          ]);
-
-        if (deptError) {
-          console.error('Department assignment failed:', deptError);
+      // Assign user to departments if specified
+      if (userData.departmentNames && userData.departmentNames.length > 0 && profileUser) {
+        console.log('🏢 Assigning departments to user:', {
+          email: userData.email,
+          profileUserId: profileUser.id,
+          authUserId: authData.user.id,
+          departments: userData.departmentNames
+        });
+        
+        for (const departmentName of userData.departmentNames) {
+          console.log(`🔄 Assigning department: ${departmentName} to ${userData.email}`);
+          const result = await assignUserToDepartment(userData.email, departmentName);
+          
+          if (!result.success) {
+            console.error(`❌ Department assignment failed for ${departmentName}:`, result.error);
+          } else {
+            console.log(`✅ Successfully assigned ${userData.email} to ${departmentName}`);
+          }
         }
+      } else {
+        console.log('⚠️ No departments to assign:', {
+          hasDepartments: !!userData.departmentNames?.length,
+          hasProfile: !!profileUser,
+          departments: userData.departmentNames
+        });
       }
 
       // Immediately sign out the new user

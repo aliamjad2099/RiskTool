@@ -58,11 +58,9 @@ const AppContent: React.FC = () => {
   };
 
   const handleNavigateToRiskRegister = (projectId: string, projectName: string) => {
-    console.log('🚀 App.tsx - Navigating to risk register:', { projectId, projectName });
     setSelectedProjectId(projectId);
     setSelectedProjectName(projectName);
     setCurrentView('risk-register');
-    console.log('✅ App.tsx - State set:', { selectedProjectId: projectId, selectedProjectName: projectName });
   };
 
   // Risk Register State (hooks moved to top of function)

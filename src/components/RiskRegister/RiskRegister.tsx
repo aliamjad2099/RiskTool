@@ -66,15 +66,7 @@ interface RiskRegisterProps {
 }
 
 const RiskRegister: React.FC<RiskRegisterProps> = ({ onBack, selectedProjectId, selectedProjectName, onClearProject }) => {
-  console.log('🔥 RiskRegister RENDER:', { selectedProjectId, selectedProjectName });
-  console.log('🔥 RENDER - selectedProjectId type:', typeof selectedProjectId, 'value:', selectedProjectId);
-  console.log('🔥 RENDER - props received:', { onBack: !!onBack, selectedProjectId, selectedProjectName, onClearProject: !!onClearProject });
-  
-  if (selectedProjectId) {
-    console.log('🎯 PROJECT SELECTED:', selectedProjectId);
-  } else {
-    console.log('❌ NO PROJECT SELECTED - selectedProjectId is:', selectedProjectId);
-  }
+  // Props validation removed from production
   
   const { user } = useAuth();
   const { createUser } = useAdmin();
@@ -281,20 +273,8 @@ const RiskRegister: React.FC<RiskRegisterProps> = ({ onBack, selectedProjectId, 
         };
       }) || [];
 
-      console.log('📊 Total risks loaded:', transformedRisks.length);
-      console.log('📊 Risk departments:', transformedRisks.map(r => ({ 
-        risk_id: r.risk_id, 
-        department_id: r.department_id, 
-        department_name: r.department_name 
-      })));
-      
-      // Store all risks
-      setRisks(transformedRisks);
-      
       // Store all risks - filtering will be handled by applyFilters()
-      console.log('📊 Data loaded, storing risks. Filtering will be handled by applyFilters()');
-      console.log('🔍 User permissions available:', !!userPermissions);
-      console.log('🔍 Selected project ID:', selectedProjectId);
+      setRisks(transformedRisks);
 
       // Set state with the already loaded data
       setDepartments(departments);
@@ -313,12 +293,7 @@ const RiskRegister: React.FC<RiskRegisterProps> = ({ onBack, selectedProjectId, 
 
   // Filter risks based on current filter state
   const applyFilters = useCallback(() => {
-    console.log('🔄 applyFilters called with:', {
-      selectedProjectId,
-      filterProject: filters.project,
-      risksCount: risks.length,
-      userPermissions: !!userPermissions
-    });
+    // Applying filters
     
     // Start from permission-filtered risks, not all risks
     let filtered = [...risks];
@@ -328,7 +303,7 @@ const RiskRegister: React.FC<RiskRegisterProps> = ({ onBack, selectedProjectId, 
       filtered = filtered.filter(risk => {
         return canViewRisk(userPermissions, risk.department_id || '');
       });
-      console.log('📊 After permission filter:', filtered.length, 'risks');
+      // Permission filter applied
     } else {
       // Secure default: show no risks if permissions not loaded
       filtered = [];
@@ -336,18 +311,15 @@ const RiskRegister: React.FC<RiskRegisterProps> = ({ onBack, selectedProjectId, 
 
     // Apply project filter - prioritize selectedProjectId, but also respect dropdown filter
     if (selectedProjectId) {
-      console.log('🎯 Applying selectedProjectId filter:', selectedProjectId);
+      // Applying selectedProjectId filter
       filtered = filtered.filter(risk => risk.project_id === selectedProjectId);
-      console.log('✅ After selectedProjectId filter:', filtered.length, 'risks');
     } else if (filters.project && filters.project !== '') {
-      console.log('🔽 Applying dropdown filter:', filters.project);
       // Apply dropdown project filter only when no selectedProjectId
       if (filters.project === 'no-project') {
         filtered = filtered.filter(risk => !risk.project_id);
       } else {
         filtered = filtered.filter(risk => risk.project_id === filters.project);
       }
-      console.log('✅ After dropdown filter:', filtered.length, 'risks');
     }
 
     // Search filter
@@ -385,18 +357,12 @@ const RiskRegister: React.FC<RiskRegisterProps> = ({ onBack, selectedProjectId, 
     }
 
     
-    console.log('🎯 FINAL FILTER RESULT:', filtered.length, 'risks');
-    console.log('🎯 FINAL FILTERED RISKS:', filtered.map(r => ({ id: r.risk_id, project_id: r.project_id, project_name: r.project_name })));
     setFilteredRisks(filtered);
   }, [selectedProjectId, filters, risks, userPermissions]);
 
   // Auto-populate project when selectedProjectId changes
   useEffect(() => {
-    console.log('🔄 selectedProjectId useEffect triggered:', {
-      selectedProjectId,
-      type: typeof selectedProjectId,
-      value: selectedProjectId
-    });
+    // selectedProjectId changed
     
     if (selectedProjectId !== undefined) {
       console.log('📝 Updating filters.project to:', selectedProjectId);
@@ -417,11 +383,6 @@ const RiskRegister: React.FC<RiskRegisterProps> = ({ onBack, selectedProjectId, 
     });
     
     if (risks.length > 0 && userPermissions) {
-      console.log('🔍 APPLYING ALL FILTERS:', {
-        selectedProjectId,
-        totalRisks: risks.length,
-        riskProjectIds: risks.map(r => ({ id: r.risk_id, project_id: r.project_id }))
-      });
       applyFilters();
     } else {
       console.log('⏳ Waiting for data:', {
@@ -643,18 +604,16 @@ const RiskRegister: React.FC<RiskRegisterProps> = ({ onBack, selectedProjectId, 
       console.log('👤 User and permissions available, loading data...');
       loadData();
     } else if (user && !userPermissions) {
-      console.log('⏳ User available but permissions not loaded yet...');
+      // User available but permissions not loaded yet
     } else if (!user) {
-      console.log('❌ No user available');
+      // No user available
     }
   }, [user, userPermissions]);
 
   // Re-filter risks when permissions change - CRITICAL FIX
   useEffect(() => {
     if (risks.length > 0 && userPermissions) {
-      console.log('🔄 Re-filtering risks with loaded permissions');
-      // Don't set filteredRisks directly - let applyFilters handle it
-      console.log('✅ Permissions loaded - applyFilters will handle filtering');
+      // Permissions loaded - applyFilters will handle filtering
     }
   }, [risks, userPermissions]);
 
@@ -868,12 +827,7 @@ const RiskRegister: React.FC<RiskRegisterProps> = ({ onBack, selectedProjectId, 
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
-                  {filteredRisks.map((risk, index) => {
-                    if (index === 0) {
-                      console.log('🎯 RENDERING RISKS:', filteredRisks.length, 'filtered risks');
-                      console.log('🎯 FILTERED RISKS FOR RENDER:', filteredRisks.map(r => ({ id: r.risk_id, project_id: r.project_id })));
-                    }
-                    return (
+                  {filteredRisks.map((risk, index) => (
                     <tr key={risk.id} className={`hover:bg-gray-50 transition-colors duration-150 ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50/30'}`}>
                       <td className="px-6 py-4 whitespace-nowrap border-r border-gray-200 last:border-r-0">
                         <span className="font-mono text-sm font-medium text-slate-900">{risk.risk_id}</span>
@@ -983,8 +937,7 @@ const RiskRegister: React.FC<RiskRegisterProps> = ({ onBack, selectedProjectId, 
                         </div>
                       </td>
                     </tr>
-                    );
-                  })}
+                  ))}
                 </tbody>
               </table>
             ) : (

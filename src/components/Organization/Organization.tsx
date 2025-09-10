@@ -92,6 +92,8 @@ const Organization: React.FC<OrganizationProps> = () => {
 
   const loadUsers = async () => {
     try {
+      console.log('🔍 Organization: Loading users...');
+      
       // First get users
       const { data: usersData, error: usersError } = await supabase
         .from('users')
@@ -99,27 +101,42 @@ const Organization: React.FC<OrganizationProps> = () => {
         .order('full_name');
 
       if (usersError) throw usersError;
+      console.log('✅ Organization: Users loaded:', usersData?.length);
 
-      // Then get user-department mappings with department details
+      // Get user-department mappings (no joins to avoid FK conflicts)
       const { data: userDepartments, error: udError } = await supabase
         .from('user_departments')
-        .select(`
-          user_id,
-          department_id,
-          departments(id, name)
-        `);
+        .select('user_id, department_id');
 
       if (udError) throw udError;
+      console.log('✅ Organization: User departments loaded:', userDepartments?.length);
 
-      // Combine the data
-      const usersWithDepartments = usersData?.map(user => ({
-        ...user,
-        user_departments: userDepartments?.filter(ud => ud.user_id === user.id) || []
-      })) || [];
+      // Get departments separately
+      const { data: departmentsData, error: deptError } = await supabase
+        .from('departments')
+        .select('id, name');
 
+      if (deptError) throw deptError;
+      console.log('✅ Organization: Departments loaded:', departmentsData?.length);
+
+      // Manual join: Combine the data
+      const usersWithDepartments = usersData?.map(user => {
+        const userDepts = userDepartments?.filter(ud => ud.user_id === user.id) || [];
+        const userDepartmentNames = userDepts.map(ud => {
+          const dept = departmentsData?.find(d => d.id === ud.department_id);
+          return dept ? { id: ud.department_id, name: dept.name } : null;
+        }).filter(Boolean);
+
+        return {
+          ...user,
+          user_departments: userDepartmentNames
+        };
+      }) || [];
+
+      console.log('✅ Organization: Users with departments processed:', usersWithDepartments.length);
       setUsers(usersWithDepartments);
     } catch (error) {
-      console.error('Error loading users:', error);
+      console.error('❌ Organization: Error loading users:', error);
     }
   };
 
@@ -169,74 +186,133 @@ const Organization: React.FC<OrganizationProps> = () => {
 
   const handleAddUser = async (e: React.FormEvent) => {
     e.preventDefault();
+    console.log('🚀 Organization: handleAddUser triggered!', { 
+      newUser, 
+      editingUser: !!editingUser,
+      formData: {
+        email: newUser.email,
+        fullName: newUser.full_name,
+        departments: newUser.selectedDepartments
+      }
+    });
     
     try {
-      // First ensure we have a default organization
-      let organizationId = '550e8400-e29b-41d4-a716-446655440000';
-      
-      const { data: orgCheck, error: orgCheckError } = await supabase
-        .from('organizations')
-        .select('id')
-        .eq('id', organizationId)
-        .single();
-      
-      if (orgCheckError && orgCheckError.code === 'PGRST116') {
-        // Organization doesn't exist, create it
-        const { data: newOrg, error: createOrgError } = await supabase
-          .from('organizations')
-          .insert([{
-            id: organizationId,
-            name: 'Default Organization',
-            subdomain: 'default-org',
-            settings: { description: 'Default organization for user management' }
-          }])
-          .select()
-          .single();
+      if (editingUser) {
+        // Update existing user departments
+        console.log('Updating user departments for:', editingUser.id);
+        
+        // Delete existing department mappings
+        const { error: deleteError } = await supabase
+          .from('user_departments')
+          .delete()
+          .eq('user_id', editingUser.id);
           
-        if (createOrgError) {
-          console.error('Failed to create organization:', createOrgError);
-          alert('Failed to create organization. Please try again.');
-          return;
+        if (deleteError) throw deleteError;
+        
+        // Insert new department mappings
+        if (newUser.selectedDepartments.length > 0) {
+          const mappings = newUser.selectedDepartments.map(deptId => ({
+            user_id: editingUser.id,
+            department_id: deptId
+          }));
+          
+          const { error: insertError } = await supabase
+            .from('user_departments')
+            .insert(mappings);
+            
+          if (insertError) throw insertError;
+        }
+        
+        // Update user profile
+        const { error: updateError } = await supabase
+          .from('users')
+          .update({
+            full_name: newUser.full_name,
+            job_title: newUser.job_title
+          })
+          .eq('id', editingUser.id);
+          
+        if (updateError) throw updateError;
+        
+        alert('User updated successfully!');
+        setEditingUser(null);
+        setShowAddUser(false);
+        await loadUsers();
+        
+      } else {
+        // Create new user (existing logic)
+        let organizationId = '550e8400-e29b-41d4-a716-446655440000';
+        
+        const { data: orgCheck, error: orgCheckError } = await supabase
+          .from('organizations')
+          .select('id')
+          .eq('id', organizationId)
+          .single();
+        
+        if (orgCheckError && orgCheckError.code === 'PGRST116') {
+          const { data: newOrg, error: createOrgError } = await supabase
+            .from('organizations')
+            .insert([{
+              id: organizationId,
+              name: 'Default Organization',
+              subdomain: 'default-org',
+              settings: { description: 'Default organization for user management' }
+            }])
+            .select()
+            .single();
+            
+          if (createOrgError) {
+            console.error('Failed to create organization:', createOrgError);
+            alert('Failed to create organization. Please try again.');
+            return;
+          }
+        }
+        
+        // Convert department IDs to department names
+        const selectedDepartmentNames = newUser.selectedDepartments.map(deptId => {
+          const dept = departments.find(d => d.id === deptId);
+          return dept?.name;
+        }).filter(Boolean) as string[];
+
+        console.log('🏢 Organization: Creating user with departments:', {
+          email: newUser.email,
+          selectedDepartmentIds: newUser.selectedDepartments,
+          selectedDepartmentNames
+        });
+
+        const userData = {
+          email: newUser.email,
+          fullName: newUser.full_name,
+          jobTitle: newUser.job_title,
+          organizationId: organizationId,
+          departmentNames: selectedDepartmentNames, // Fixed: use departmentNames array
+          role: 'user' as const
+        };
+
+        const result = await createUser(userData);
+
+        if (result.user && !result.error) {
+          console.log('User created successfully');
+          setTempPassword(result.tempPassword || '');
+          setShowAddUser(false);
+          setTimeout(() => setShowTempPassword(true), 200);
+          await loadUsers();
+        } else {
+          console.error('Error creating user:', result.error);
+          alert('Error creating user: ' + (result.error?.message || result.error));
         }
       }
       
-      const userData = {
-        email: newUser.email,
-        fullName: newUser.full_name,
-        jobTitle: newUser.job_title,
-        organizationId: organizationId,
-        departmentId: newUser.selectedDepartments[0], // Use first selected department
-        role: 'user' as const
-      };
-
-      const result = await createUser(userData);
-
-      if (result.user && !result.error) {
-        console.log('User created successfully, showing temp password:', result.tempPassword);
-        
-        // Set temp password and show modal immediately
-        setTempPassword(result.tempPassword || '');
-        setShowAddUser(false); // Close the add user form first
-        
-        // Wait a moment for form to close, then show temp password modal
-        setTimeout(() => {
-          setShowTempPassword(true);
-        }, 200);
-        
-        await loadUsers();
-        setNewUser({
-          full_name: '',
-          email: '',
-          job_title: '',
-          selectedDepartments: []
-        });
-      } else {
-        console.error('Error creating user:', result.error);
-        alert('Error creating user: ' + (result.error?.message || result.error));
-      }
+      setNewUser({
+        full_name: '',
+        email: '',
+        job_title: '',
+        selectedDepartments: []
+      });
+      
     } catch (error) {
-      console.error('Error adding user:', error);
-      alert('Error adding user');
+      console.error('Error saving user:', error);
+      alert('Error saving user: ' + (error as any)?.message);
     }
   };
 
@@ -535,8 +611,8 @@ const Organization: React.FC<OrganizationProps> = () => {
                           <div className="flex flex-wrap gap-1">
                             {user.user_departments && user.user_departments.length > 0 ? (
                               user.user_departments.map((ud: any) => (
-                                <span key={ud.department_id} className="rg-badge rg-badge-info text-xs">
-                                  {ud.departments?.name || 'Unknown Dept'}
+                                <span key={ud.id} className="rg-badge rg-badge-info text-xs">
+                                  {ud.name || 'Unknown Dept'}
                                 </span>
                               ))
                             ) : (
@@ -809,6 +885,15 @@ const Organization: React.FC<OrganizationProps> = () => {
                 </button>
                 <button 
                   type="submit" 
+                  onClick={(e) => {
+                    console.log('🖱️ Organization: Submit button clicked!', {
+                      formValid: e.currentTarget.form?.checkValidity(),
+                      newUser: newUser,
+                      hasEmail: !!newUser.email,
+                      hasName: !!newUser.full_name,
+                      hasDepartments: newUser.selectedDepartments.length > 0
+                    });
+                  }}
                   className="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
                 >
                   {editingUser ? 'Update User' : 'Add User'}
