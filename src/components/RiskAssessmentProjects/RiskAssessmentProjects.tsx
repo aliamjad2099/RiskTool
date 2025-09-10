@@ -21,6 +21,7 @@ interface RiskAssessmentProjectsProps {
 }
 
 const RiskAssessmentProjects: React.FC<RiskAssessmentProjectsProps> = ({ onBack, onNavigateToRiskRegister }) => {
+  console.log('🏗️ RiskAssessmentProjects component mounted');
   const [projects, setProjects] = useState<RiskAssessmentProject[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -258,6 +259,7 @@ const RiskAssessmentProjects: React.FC<RiskAssessmentProjectsProps> = ({ onBack,
 
   // Open project for risk management
   const openProject = (project: RiskAssessmentProject) => {
+    console.log('🎯 Project card clicked:', { projectId: project.id, projectName: project.name });
     onNavigateToRiskRegister(project.id, project.name);
   };
 
@@ -338,7 +340,10 @@ const RiskAssessmentProjects: React.FC<RiskAssessmentProjectsProps> = ({ onBack,
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
             {projects.map((project) => (
-              <div key={project.id} className="rg-card rg-slide-in" style={{cursor: 'pointer'}} onClick={() => openProject(project)}>
+              <div key={project.id} className="rg-card rg-slide-in" style={{cursor: 'pointer'}} onClick={() => {
+                console.log('🔥 CARD CLICKED - Direct onClick handler');
+                openProject(project);
+              }}>
                 <div className="rg-card-header">
                   <div className="flex justify-between items-start">
                     <div className="flex-1">

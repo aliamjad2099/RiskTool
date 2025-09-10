@@ -1,5 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { useAuth } from '../../contexts/AuthContext';
+import { useAdmin } from '../../contexts/AdminContext';
+import { useOrganization } from '../../contexts/OrganizationContext';
+import { getUserPermissions, canViewRisk, canEditRisk, canManageControls, canViewEvidence, UserPermissions } from '../../utils/permissionService';
 import { supabase } from '../../lib/supabase';
+import ControlManagement from '../ControlManagement/ControlManagement';
 
 interface Risk {
   id: string;
@@ -28,6 +33,9 @@ interface Risk {
   department_name?: string;
   due_date?: string;
   comments?: string;
+  project_name?: string;
+  project_id?: string;
+  residual_risk?: string;
 }
 
 interface Department {
@@ -40,6 +48,16 @@ interface Control {
   title: string;
 }
 
+interface Category {
+  id: string;
+  name: string;
+}
+
+interface Project {
+  id: string;
+  name: string;
+}
+
 interface RiskRegisterProps {
   onBack: () => void;
   selectedProjectId?: string | null;
@@ -48,25 +66,46 @@ interface RiskRegisterProps {
 }
 
 const RiskRegister: React.FC<RiskRegisterProps> = ({ onBack, selectedProjectId, selectedProjectName, onClearProject }) => {
-  const [risks, setRisks] = useState<any[]>([]);
-  const [departments, setDepartments] = useState<any[]>([]);
-  const [projects, setProjects] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [showModal, setShowModal] = useState(false);
-  const [editingRisk, setEditingRisk] = useState<any>(null);
-  const [categories, setCategories] = useState<any[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  console.log('🔥 RiskRegister RENDER:', { selectedProjectId, selectedProjectName });
+  console.log('🔥 RENDER - selectedProjectId type:', typeof selectedProjectId, 'value:', selectedProjectId);
+  console.log('🔥 RENDER - props received:', { onBack: !!onBack, selectedProjectId, selectedProjectName, onClearProject: !!onClearProject });
   
-  // Filter state
-  const [filters, setFilters] = useState({
-    search: '',
-    status: 'all',
-    riskLevel: 'all',
-    department: 'all',
-    project: 'all'
-  });
+  if (selectedProjectId) {
+    console.log('🎯 PROJECT SELECTED:', selectedProjectId);
+  } else {
+    console.log('❌ NO PROJECT SELECTED - selectedProjectId is:', selectedProjectId);
+  }
+  
+  const { user } = useAuth();
+  const { createUser } = useAdmin();
+  
+  // Permission state
+  const [userPermissions, setUserPermissions] = useState<UserPermissions | null>(null);
+  
+  const [risks, setRisks] = useState<Risk[]>([]);
+  const [filteredRisks, setFilteredRisks] = useState<Risk[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [controls, setControls] = useState<Control[]>([]);
+  const [riskMatrix, setRiskMatrix] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [showRiskForm, setShowRiskForm] = useState(false);
+  const [editingRisk, setEditingRisk] = useState<Risk | null>(null);
   const [filtersCollapsed, setFiltersCollapsed] = useState(true);
-  const hasLoadedSamples = useRef(false);
+  const [showControlManagement, setShowControlManagement] = useState(false);
+  const [selectedRiskForControl, setSelectedRiskForControl] = useState<Risk | null>(null);
+  const [evidence, setEvidence] = useState<any[]>([]);
+
+  // Filter states - initialize project filter from prop
+  const [filters, setFilters] = useState(() => ({
+    search: '',
+    status: '',
+    riskLevel: '',
+    department: '',
+    project: selectedProjectId || ''
+  }));
 
   // Form state
   const [formData, setFormData] = useState({
@@ -76,568 +115,548 @@ const RiskRegister: React.FC<RiskRegisterProps> = ({ onBack, selectedProjectId, 
     department_id: '',
     inherent_likelihood: 3,
     inherent_impact: 3,
-    priority: '',
-    identified_date: '',
     control_name: '',
     control_rating: 0,
     due_date: '',
-    comments: ''
+    comments: '',
+    project_id: ''
   });
 
-  const [riskMatrix, setRiskMatrix] = useState<any>(null);
 
+  // Load user permissions
   useEffect(() => {
-    console.log('RiskRegister component mounted - loading data...');
-    loadRiskMatrix();
-    loadRisks();
-    loadControls();
-    loadCategories();
-    loadDepartments();
-    loadProjects();
-  }, []);
-
-  // Reload risks when project filter changes
-  useEffect(() => {
-    if (selectedProjectId !== undefined) {
-      loadRisks();
+    if (!user) {
+      return;
     }
-  }, [selectedProjectId]);
 
-  const loadControls = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('controls')
-        .select('id, title')
-        .eq('organization_id', '00000000-0000-0000-0000-000000000000');
+    const loadUserPermissions = async () => {
+      try {
+        const permissions = await getUserPermissions(user.id, user.email || '');
+        setUserPermissions(permissions);
+      } catch (error) {
+        console.error('❌ RiskRegister: Permission loading error:', error);
+        setUserPermissions(null);
+      }
+    };
 
-      if (error) throw error;
-      // Controls are now stored directly in risks table
-    } catch (error) {
-      console.error('Error loading controls:', error);
+    loadUserPermissions();
+  }, [user]);
+
+  // Permission check functions using the service
+  const canViewRiskLocal = (riskDepartmentId: string) => {
+    console.log('🔍 canViewRiskLocal called:', {
+      riskDepartmentId,
+      userPermissions: userPermissions ? 'loaded' : 'null',
+      departmentIds: userPermissions?.departmentIds
+    });
+    
+    if (!userPermissions) {
+      console.log('⚠️ Permissions not loaded, DENYING access');
+      return false;
     }
+    return canViewRisk(userPermissions, riskDepartmentId);
   };
 
-  const loadCategories = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('risk_categories')
-        .select('id, name')
-        .eq('organization_id', '00000000-0000-0000-0000-000000000000');
-
-      if (error) throw error;
-      if (data) setCategories(data);
-    } catch (error) {
-      console.error('Error loading categories:', error);
-    }
+  const canEditRiskLocal = (riskDepartmentId: string) => {
+    return canEditRisk(userPermissions, riskDepartmentId);
   };
 
-  const loadRiskMatrix = async () => {
+  const canManageControlsLocal = (riskDepartmentId: string) => {
+    return canManageControls(userPermissions, riskDepartmentId);
+  };
+
+  const canViewEvidenceLocal = () => {
+    return canViewEvidence(userPermissions);
+  };
+
+  // Utility functions
+  const calculateRiskLevel = (likelihood: number, impact: number) => {
+    const score = likelihood * impact;
+    // console.log(`🎯 Risk calc: L=${likelihood} × I=${impact} = ${score}`);
+    
+    if (!riskMatrix || !riskMatrix.risk_levels) {
+      console.log('⚠️ Using fallback - no risk matrix');
+      if (score >= 12) return 'Critical';
+      if (score >= 8) return 'High';
+      if (score >= 4) return 'Medium';
+      return 'Low';
+    }
+    
+    // console.log('📊 Risk levels:', JSON.stringify(riskMatrix.risk_levels, null, 2));
+    const levels = riskMatrix.risk_levels.sort((a: any, b: any) => a.minScore - b.minScore);
+    
+    // Find the appropriate level based on score
+    for (let i = levels.length - 1; i >= 0; i--) {
+      if (score >= levels[i].minScore) {
+        return levels[i].name;
+      }
+    }
+    
+    console.log('🟢 Default: Low');
+    return 'Low';
+  };
+
+  const getDueDateStatus = (dueDate: string | null) => {
+    if (!dueDate) return 'no-date';
+    const today = new Date();
+    const due = new Date(dueDate);
+    const diffTime = due.getTime() - today.getTime();
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    
+    if (diffDays < 0) return 'overdue';
+    if (diffDays <= 7) return 'due-soon';
+    return 'on-track';
+  };
+
+  const loadData = async () => {
     try {
-      const { data, error } = await supabase
+      console.log('📊 Loading data...');
+      console.log('🔍 Current userPermissions state:', userPermissions);
+      console.log('🔍 User object:', user);
+      setLoading(true);
+      setError(null);
+
+      // Load risk matrix configuration
+      const { data: matrixData } = await supabase
         .from('risk_matrix_config')
         .select('*')
         .eq('organization_id', '00000000-0000-0000-0000-000000000000')
-        .eq('is_active', true)
-        .maybeSingle();
-
-      if (error) throw error;
+        .single();
       
-      if (data) {
-        console.log('Loaded risk matrix config:', data);
-        setRiskMatrix(data);
-      } else {
-        console.log('No risk matrix config found, using defaults');
-        // Fallback to default if no configuration found
-        setRiskMatrix({
-          matrix_size: 5,
-          risk_levels: [
-            {"id": "very_low", "name": "VERY LOW", "minScore": 1, "maxScore": 4, "color": "rg-risk-very-low"},
-            {"id": "low", "name": "LOW", "minScore": 5, "maxScore": 9, "color": "rg-risk-low"},
-            {"id": "medium", "name": "MEDIUM", "minScore": 10, "maxScore": 14, "color": "rg-risk-medium"},
-            {"id": "high", "name": "HIGH", "minScore": 15, "maxScore": 19, "color": "rg-risk-high"},
-            {"id": "critical", "name": "CRITICAL", "minScore": 20, "maxScore": 25, "color": "rg-risk-critical"}
-          ]
-        });
-      }
-    } catch (error) {
-      console.error('Error loading risk matrix:', error);
-      // Fallback to default if error occurred
-      setRiskMatrix({
-        matrix_size: 5,
-        risk_levels: [
-          {"id": "very_low", "name": "VERY LOW", "minScore": 1, "maxScore": 4, "color": "rg-risk-very-low"},
-          {"id": "low", "name": "LOW", "minScore": 5, "maxScore": 9, "color": "rg-risk-low"},
-          {"id": "medium", "name": "MEDIUM", "minScore": 10, "maxScore": 14, "color": "rg-risk-medium"},
-          {"id": "high", "name": "HIGH", "minScore": 15, "maxScore": 19, "color": "rg-risk-high"},
-          {"id": "critical", "name": "CRITICAL", "minScore": 20, "maxScore": 25, "color": "rg-risk-critical"}
-        ]
+      setRiskMatrix(matrixData || {
+        low_threshold: 4,
+        medium_threshold: 8,
+        high_threshold: 12
       });
-    }
-  };
 
-  const loadDepartments = async () => {
-    try {
-      const { data: departmentsData, error: deptError } = await supabase
-        .from('departments')
-        .select('id, name')
-        .eq('organization_id', '00000000-0000-0000-0000-000000000000');
-
-      if (deptError) throw deptError;
-      setDepartments(departmentsData || []);
-    } catch (error) {
-      console.error('Error loading departments:', error);
-    }
-  };
-
-  const loadProjects = async () => {
-    try {
-      const { data: projectsData, error: projError } = await supabase
-        .from('risk_assessment_projects')
-        .select('id, name')
-        .eq('organization_id', '00000000-0000-0000-0000-000000000000')
-        .eq('is_deleted', false);
-
-      if (projError) throw projError;
-      setProjects(projectsData || []);
-    } catch (error) {
-      console.error('Error loading projects:', error);
-    }
-  };
-
-  const loadRisks = async () => {
-    try {
-      console.log('Loading risks from database...');
-      let query = supabase
+      // Load risks without joins to avoid relationship conflicts, then manually join
+      const { data: riskData, error: riskError } = await supabase
         .from('risks')
-        .select(`
-          *,
-          departments(name),
-          risk_categories(name),
-          risk_assessment_projects(name)
-        `)
-        .eq('organization_id', '00000000-0000-0000-0000-000000000000');
+        .select('*')
+        .eq('organization_id', '00000000-0000-0000-0000-000000000000')
+        .order('created_at', { ascending: false });
 
-      // Filter by project if selected
-      if (selectedProjectId) {
-        query = query.eq('project_id', selectedProjectId);
-        console.log('Filtering risks by project:', selectedProjectId);
+      if (riskError) {
+        console.error('❌ Risk loading error:', riskError);
+        throw riskError;
       }
 
-      const { data: risksData, error } = await query.order('created_at', { ascending: false });
+      // Load supporting data for manual joins
+      const [deptResult, catResult, projResult, controlResult] = await Promise.all([
+        supabase.from('departments').select('*').eq('organization_id', '00000000-0000-0000-0000-000000000000'),
+        supabase.from('risk_categories').select('*').eq('organization_id', '00000000-0000-0000-0000-000000000000'),
+        supabase.from('risk_assessment_projects').select('*').eq('organization_id', '00000000-0000-0000-0000-000000000000'),
+        supabase.from('controls').select('*').eq('organization_id', '00000000-0000-0000-0000-000000000000').order('title')
+      ]);
 
-      if (error) throw error;
+      const departments = deptResult.data || [];
+      const categories = catResult.data || [];
+      const projects = projResult.data || [];
+      const controls = controlResult.data || [];
 
-      // Transform the data to add department, category, and project names
-      const flattenedRisks = risksData?.map(risk => ({
-        ...risk,
-        department_name: risk.departments?.name,
-        category_name: risk.risk_categories?.name,
-        project_name: risk.risk_assessment_projects?.name || 'No Project'
-      })) || [];
+      // Transform risk data with manual joins and calculate scores
+      const transformedRisks = riskData?.map(risk => {
+        const inherentScore = risk.inherent_likelihood * risk.inherent_impact;
+        const residualScore = (risk.residual_likelihood || risk.inherent_likelihood) * (risk.residual_impact || risk.inherent_impact);
+        
+        // Manual joins
+        const department = departments.find(d => d.id === risk.department_id);
+        const category = categories.find(c => c.id === risk.category_id);
+        const project = projects.find(p => p.id === risk.project_id);
+        
+        console.log(`🔄 Processing risk ${risk.risk_id}:`, {
+          department_id: risk.department_id,
+          department_name: department?.name,
+          inherent: `L=${risk.inherent_likelihood} I=${risk.inherent_impact} Score=${inherentScore}`,
+          residual: `L=${risk.residual_likelihood || risk.inherent_likelihood} I=${risk.residual_impact || risk.inherent_impact} Score=${residualScore}`
+        });
 
-      console.log('Flattened risks loaded:', flattenedRisks);
-      setRisks(flattenedRisks);
+        return {
+          ...risk,
+          inherent_score: inherentScore,
+          residual_score: residualScore,
+          department_name: department?.name || 'Unknown',
+          category_name: category?.name || 'Uncategorized',
+          project_name: project?.name || null
+        };
+      }) || [];
+
+      console.log('📊 Total risks loaded:', transformedRisks.length);
+      console.log('📊 Risk departments:', transformedRisks.map(r => ({ 
+        risk_id: r.risk_id, 
+        department_id: r.department_id, 
+        department_name: r.department_name 
+      })));
+      
+      // Store all risks
+      setRisks(transformedRisks);
+      
+      // Store all risks - filtering will be handled by applyFilters()
+      console.log('📊 Data loaded, storing risks. Filtering will be handled by applyFilters()');
+      console.log('🔍 User permissions available:', !!userPermissions);
+      console.log('🔍 Selected project ID:', selectedProjectId);
+
+      // Set state with the already loaded data
+      setDepartments(departments);
+      setCategories(categories);
+      setProjects(projects);
+      setControls(controls);
+
+      console.log('✅ All data loaded successfully');
     } catch (error) {
-      console.error('Error loading risks:', error);
+      console.error('❌ Data loading error:', error);
+      setError(`Failed to load data: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
       setLoading(false);
     }
   };
 
+  // Filter risks based on current filter state
+  const applyFilters = useCallback(() => {
+    console.log('🔄 applyFilters called with:', {
+      selectedProjectId,
+      filterProject: filters.project,
+      risksCount: risks.length,
+      userPermissions: !!userPermissions
+    });
+    
+    // Start from permission-filtered risks, not all risks
+    let filtered = [...risks];
+    
+    // First apply permission filtering
+    if (userPermissions) {
+      filtered = filtered.filter(risk => {
+        return canViewRisk(userPermissions, risk.department_id || '');
+      });
+      console.log('📊 After permission filter:', filtered.length, 'risks');
+    } else {
+      // Secure default: show no risks if permissions not loaded
+      filtered = [];
+    }
+
+    // Apply project filter - prioritize selectedProjectId, but also respect dropdown filter
+    if (selectedProjectId) {
+      console.log('🎯 Applying selectedProjectId filter:', selectedProjectId);
+      filtered = filtered.filter(risk => risk.project_id === selectedProjectId);
+      console.log('✅ After selectedProjectId filter:', filtered.length, 'risks');
+    } else if (filters.project && filters.project !== '') {
+      console.log('🔽 Applying dropdown filter:', filters.project);
+      // Apply dropdown project filter only when no selectedProjectId
+      if (filters.project === 'no-project') {
+        filtered = filtered.filter(risk => !risk.project_id);
+      } else {
+        filtered = filtered.filter(risk => risk.project_id === filters.project);
+      }
+      console.log('✅ After dropdown filter:', filtered.length, 'risks');
+    }
+
+    // Search filter
+    if (filters.search) {
+      const searchLower = filters.search.toLowerCase();
+      filtered = filtered.filter(risk => 
+        risk.title.toLowerCase().includes(searchLower) ||
+        risk.description?.toLowerCase().includes(searchLower) ||
+        risk.risk_id.toLowerCase().includes(searchLower)
+      );
+    }
+
+    // Status filter (based on due date)
+    if (filters.status) {
+      filtered = filtered.filter(risk => {
+        const status = getDueDateStatus(risk.due_date || null);
+        return status === filters.status;
+      });
+    }
+
+    // Risk level filter
+    if (filters.riskLevel) {
+      filtered = filtered.filter(risk => {
+        const level = calculateRiskLevel(
+          risk.residual_likelihood || risk.inherent_likelihood,
+          risk.residual_impact || risk.inherent_impact
+        );
+        return level === filters.riskLevel;
+      });
+    }
+
+    // Department filter
+    if (filters.department) {
+      filtered = filtered.filter(risk => risk.department_id === filters.department);
+    }
+
+    
+    console.log('🎯 FINAL FILTER RESULT:', filtered.length, 'risks');
+    console.log('🎯 FINAL FILTERED RISKS:', filtered.map(r => ({ id: r.risk_id, project_id: r.project_id, project_name: r.project_name })));
+    setFilteredRisks(filtered);
+  }, [selectedProjectId, filters, risks, userPermissions]);
+
+  // Auto-populate project when selectedProjectId changes
+  useEffect(() => {
+    console.log('🔄 selectedProjectId useEffect triggered:', {
+      selectedProjectId,
+      type: typeof selectedProjectId,
+      value: selectedProjectId
+    });
+    
+    if (selectedProjectId !== undefined) {
+      console.log('📝 Updating filters.project to:', selectedProjectId);
+      setFilters(prev => ({ ...prev, project: selectedProjectId || '' }));
+    }
+    if (selectedProjectId && (showRiskForm || !editingRisk)) {
+      setFormData(prev => ({ ...prev, project_id: selectedProjectId }));
+    }
+  }, [selectedProjectId, showRiskForm, editingRisk]);
+
+  // Apply filters whenever filter state changes OR selectedProjectId changes
+  useEffect(() => {
+    console.log('🚀 useEffect triggered:', {
+      risksLength: risks.length,
+      hasUserPermissions: !!userPermissions,
+      selectedProjectId,
+      filterProject: filters.project
+    });
+    
+    if (risks.length > 0 && userPermissions) {
+      console.log('🔍 APPLYING ALL FILTERS:', {
+        selectedProjectId,
+        totalRisks: risks.length,
+        riskProjectIds: risks.map(r => ({ id: r.risk_id, project_id: r.project_id }))
+      });
+      applyFilters();
+    } else {
+      console.log('⏳ Waiting for data:', {
+        risks: risks.length,
+        permissions: !!userPermissions
+      });
+    }
+  }, [filters, risks, selectedProjectId, userPermissions]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    console.log('Form submitted with data:', formData);
-    console.log('Editing risk:', editingRisk);
+    console.log('🚀 Form submitted', { editingRisk, formData });
     
     try {
-      // formData.category now contains the actual category ID from database
-      if (!formData.category) {
-        alert('Please select a valid category.');
+      // Validate required fields
+      if (!formData.title || !formData.description || !formData.department_id) {
+        alert('Please fill in all required fields (Title, Description, Department)');
         return;
       }
 
-      const inherentRisk = formData.inherent_likelihood * formData.inherent_impact;
       // Calculate residual risk based on control effectiveness
-      const effectivenessReduction = formData.control_rating;
-      let residualLikelihood, residualImpact;
-      if (effectivenessReduction >= 0.95) {
-        // 95% Excellent control = Low risk (score 1-2)
-        residualLikelihood = 1;
-        residualImpact = 2;
-      } else if (effectivenessReduction >= 0.8) {
-        // 80% Strong control = Medium risk (score 3-4)
-        residualLikelihood = 1;
-        residualImpact = 3;
-      } else if (effectivenessReduction >= 0.6) {
-        // 60% Good control = High risk (score 6-8)
-        residualLikelihood = 2;
-        residualImpact = 3;
-      } else if (effectivenessReduction >= 0.4) {
-        // 40% Adequate control = Critical risk (reduced)
-        residualLikelihood = 3;
-        residualImpact = 3;
-      } else if (effectivenessReduction >= 0.2) {
-        // 20% Weak control = Critical risk (minimal reduction)
-        residualLikelihood = Math.max(1, Math.round(formData.inherent_likelihood * 0.9));
-        residualImpact = Math.max(1, Math.round(formData.inherent_impact * 0.95));
-      } else {
-        // 0% No control = No reduction
-        residualLikelihood = formData.inherent_likelihood;
-        residualImpact = formData.inherent_impact;
-      }
-      console.log('Risk calculation:', {
-        inherent: { likelihood: formData.inherent_likelihood, impact: formData.inherent_impact, score: inherentRisk },
-        control_rating: formData.control_rating,
-        residual: { likelihood: residualLikelihood, impact: residualImpact }
-      });
-
-      const riskData = {
+      const controlEffectiveness = formData.control_rating / 100;
+      console.log(`🔧 Control calc: ${formData.control_rating}% = ${controlEffectiveness}`);
+      
+      // With 0% control, residual should equal inherent
+      // With higher control, reduce risk proportionally
+      const residualLikelihood = controlEffectiveness === 0 ? 
+        formData.inherent_likelihood : 
+        Math.max(1, Math.round(formData.inherent_likelihood * (1 - controlEffectiveness * 0.8)));
+      const residualImpact = controlEffectiveness === 0 ? 
+        formData.inherent_impact : 
+        Math.max(1, Math.round(formData.inherent_impact * (1 - controlEffectiveness * 0.3)));
+      
+      console.log(`📊 Residual calc: Inherent L=${formData.inherent_likelihood} I=${formData.inherent_impact} → Residual L=${residualLikelihood} I=${residualImpact}`);
+      
+      const riskData: any = {
+        organization_id: '00000000-0000-0000-0000-000000000000',
+        risk_id: editingRisk ? editingRisk.risk_id : `RISK-${String(risks.length + 1).padStart(3, '0')}`,
         title: formData.title,
         description: formData.description,
-        category_id: formData.category,
         department_id: formData.department_id,
+        category_id: formData.category || null,
         inherent_likelihood: formData.inherent_likelihood,
         inherent_impact: formData.inherent_impact,
+        // Remove inherent_score - it's a generated column
         residual_likelihood: residualLikelihood,
         residual_impact: residualImpact,
-        control_name: formData.control_name,
-        control_rating: formData.control_rating,
+        // Remove residual_score - it's a generated column
+        control_name: formData.control_name || null,
+        control_rating: formData.control_rating ? Math.min(formData.control_rating / 100, 1.0) : null,
         due_date: formData.due_date || null,
         comments: formData.comments || null,
-        organization_id: '00000000-0000-0000-0000-000000000000',
-        project_id: selectedProjectId || null,
-        risk_id: `RISK-${String(Date.now()).slice(-6)}`,
-        status: 'not_materialized',
-        priority: formData.priority || 'medium',
-        identified_date: formData.identified_date || new Date().toISOString().split('T')[0]
+        project_id: formData.project_id || selectedProjectId || null,
+        status: editingRisk ? editingRisk.status : 'not_materialized',
+        identified_date: new Date().toISOString().split('T')[0]
       };
 
+      console.log('💾 Saving risk data:', riskData);
+
       if (editingRisk) {
-        // Update existing risk
-        const { error: riskError } = await supabase
+        console.log('✏️ Updating existing risk:', editingRisk.id);
+        const { error } = await supabase
           .from('risks')
-          .update({
-            title: formData.title,
-            description: formData.description,
-            category_id: formData.category,
-            department_id: formData.department_id,
-            inherent_likelihood: formData.inherent_likelihood,
-            inherent_impact: formData.inherent_impact,
-            residual_likelihood: residualLikelihood,
-            residual_impact: residualImpact,
-            control_name: formData.control_name,
-            control_rating: formData.control_rating,
-            due_date: formData.due_date || null,
-            comments: formData.comments || null,
-            priority: formData.priority || 'medium',
-            identified_date: formData.identified_date || new Date().toISOString().split('T')[0]
-          })
+          .update(riskData)
           .eq('id', editingRisk.id);
-
-        if (riskError) {
-          console.error('Error updating risk:', riskError);
-          throw riskError;
+        if (error) {
+          console.error('❌ Update error:', error);
+          throw error;
         }
-        console.log('Risk updated successfully');
-        
-        // Force database to refresh generated columns by reading the updated record
-        const { data: updatedRisk } = await supabase
-          .from('risks')
-          .select('residual_score, residual_likelihood, residual_impact')
-          .eq('id', editingRisk.id)
-          .single();
-        
-        console.log('Post-update database values:', updatedRisk);
-
-        // Control name is now stored directly in the risk record, no junction table needed
+        console.log('✅ Risk updated successfully');
       } else {
-        // Create new risk
-        const { data: newRisk, error: riskError } = await supabase
+        console.log('➕ Creating new risk');
+        const { error } = await supabase
           .from('risks')
-          .insert(riskData)
-          .select()
-          .single();
-
-        if (riskError) throw riskError;
-        
-        // Force database to refresh generated columns for new risk
-        const { data: newRiskData } = await supabase
-          .from('risks')
-          .select('residual_score, residual_likelihood, residual_impact')
-          .eq('id', newRisk.id)
-          .single();
-        
-        console.log('New risk database values:', newRiskData);
-
-        // Control name is now stored directly in the risk record, no junction table needed
+          .insert([riskData]);
+        if (error) {
+          console.error('❌ Insert error:', error);
+          throw error;
+        }
+        console.log('✅ Risk created successfully');
       }
 
-      await loadRisks();
-      setShowModal(false);
+      // Reset form and close modal
+      setFormData({
+        title: '',
+        description: '',
+        category: '',
+        department_id: '',
+        inherent_likelihood: 3,
+        inherent_impact: 3,
+        control_name: '',
+        control_rating: 0,
+        due_date: '',
+        comments: '',
+        project_id: selectedProjectId || ''
+      });
       setEditingRisk(null);
-      resetForm();
-      alert('Risk saved successfully! Check console for calculation details.');
+      setShowRiskForm(false);
       
-      // Debug: Log the saved risk to verify values
-      console.log('Risk saved with final values - reloading data...');
+      // Reload data to show changes
+      await loadData();
+      
     } catch (error) {
-      console.error('Error saving risk:', error);
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      alert(`Error saving risk: ${errorMessage}. Please try again.`);
+      console.error('❌ Error saving risk:', error);
+      alert(`Failed to ${editingRisk ? 'update' : 'create'} risk: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   };
 
-  const resetForm = () => {
-    setFormData({
-      title: '',
-      description: '',
-      category: '',
-      department_id: '',
-      inherent_likelihood: 3,
-      inherent_impact: 3,
-      priority: '',
-      identified_date: '',
-      control_name: '',
-      control_rating: 0,
-      due_date: '',
-      comments: ''
-    });
+  const loadEvidence = async (riskId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('control_evidence')
+        .select('*')
+        .eq('risk_uuid', riskId)
+        .order('uploaded_at', { ascending: false });
+
+      if (error) throw error;
+      setEvidence(data || []);
+    } catch (error) {
+      console.error('Error loading evidence:', error);
+    }
+  };
+
+  const downloadEvidence = async (filePath: string, fileName: string) => {
+    try {
+      const { data: urlData } = await supabase.storage
+        .from('control-evidence')
+        .createSignedUrl(filePath, 60);
+
+      if (urlData?.signedUrl) {
+        const response = await fetch(urlData.signedUrl);
+        const blob = await response.blob();
+        
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = fileName;
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+    } catch (error) {
+      console.error('Error downloading evidence:', error);
+    }
   };
 
   const handleEdit = (risk: Risk) => {
-    setEditingRisk(risk);
     setFormData({
       title: risk.title,
       description: risk.description || '',
       category: risk.category_id || '',
-      inherent_likelihood: risk.inherent_likelihood,
-      inherent_impact: risk.inherent_impact,
       department_id: risk.department_id || '',
-      priority: risk.priority || '',
-      identified_date: risk.identified_date || '',
+      inherent_likelihood: risk.inherent_likelihood || 3,
+      inherent_impact: risk.inherent_impact || 3,
       control_name: risk.control_name || '',
       control_rating: risk.control_rating || 0,
       due_date: risk.due_date || '',
-      comments: risk.comments || ''
+      comments: risk.comments || '',
+      project_id: risk.project_id || ''
     });
-    setShowModal(true);
+    setEditingRisk(risk);
+    setShowRiskForm(true);
+    
+    // Load evidence for Risk team users and admins
+    console.log('🔍 Evidence loading check:', {
+      user: user?.email,
+      isAdmin: user?.role === 'admin',
+      isRiskTeamUser: userPermissions?.isRiskTeamUser,
+      shouldLoadEvidence: userPermissions?.isRiskTeamUser || user?.role === 'admin'
+    });
+    
+    if (canViewEvidenceLocal()) {
+      loadEvidence(risk.id);
+    }
+  };
+
+  const handleManageControl = (risk: Risk) => {
+    setSelectedRiskForControl(risk);
+    setShowControlManagement(true);
+  };
+
+  const clearFilters = () => {
+    setFilters({
+      search: '',
+      status: '',
+      riskLevel: '',
+      department: '',
+      project: ''
+    });
   };
 
   const handleDelete = async (risk: Risk) => {
-    if (!confirm('Are you sure you want to delete this risk?')) return;
+    if (!window.confirm(`Are you sure you want to delete the risk "${risk.title}"? This action cannot be undone.`)) {
+      return;
+    }
 
     try {
-      // Delete the risk (no junction table entries to clean up)
+      console.log('🗑️ Deleting risk:', risk.id);
       const { error } = await supabase
         .from('risks')
         .delete()
         .eq('id', risk.id);
-
-      if (error) throw error;
-
-      await loadRisks();
+      
+      if (error) {
+        console.error('❌ Delete error:', error);
+        throw error;
+      }
+      
+      console.log('✅ Risk deleted successfully');
+      await loadData(); // Reload data to reflect deletion
     } catch (error) {
-      console.error('Error deleting risk:', error);
-      alert('Error deleting risk. Please try again.');
+      console.error('❌ Error deleting risk:', error);
+      alert(`Failed to delete risk: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   };
 
-  // Risk matrix mapping using database configuration
-  const getRiskLevelFromScore = (score: number) => {
-    if (!riskMatrix || !riskMatrix.risk_levels) {
-      // Fallback if no matrix loaded
-      if (score >= 20) return { name: 'CRITICAL', color: 'rg-risk-critical' };
-      if (score >= 15) return { name: 'HIGH', color: 'rg-risk-high' };
-      if (score >= 10) return { name: 'MEDIUM', color: 'rg-risk-medium' };
-      if (score >= 5) return { name: 'LOW', color: 'rg-risk-low' };
-      return { name: 'VERY LOW', color: 'rg-risk-very-low' };
+  // Load data when user and permissions are both available
+  useEffect(() => {
+    if (user && userPermissions) {
+      console.log('👤 User and permissions available, loading data...');
+      loadData();
+    } else if (user && !userPermissions) {
+      console.log('⏳ User available but permissions not loaded yet...');
+    } else if (!user) {
+      console.log('❌ No user available');
     }
+  }, [user, userPermissions]);
 
-    // Use database configuration
-    const levels = riskMatrix.risk_levels;
-    for (const level of levels) {
-      if (score >= level.minScore && score <= level.maxScore) {
-        return { name: level.name, color: level.color };
-      }
+  // Re-filter risks when permissions change - CRITICAL FIX
+  useEffect(() => {
+    if (risks.length > 0 && userPermissions) {
+      console.log('🔄 Re-filtering risks with loaded permissions');
+      // Don't set filteredRisks directly - let applyFilters handle it
+      console.log('✅ Permissions loaded - applyFilters will handle filtering');
     }
-    
-    // Default fallback
-    return { name: 'UNKNOWN', color: 'rg-risk-low' };
-  };
-
-  const getRiskLevelColor = (level: string) => {
-    const score = parseInt(level) || 0;
-    return getRiskLevelFromScore(score).color;
-  };
-
-  const getStatusColor = (status: string) => {
-    return status === 'materialized' ? 'rg-status-high' : 'rg-status-medium';
-  };
-
-  const getInherentRiskColor = (score: number) => {
-    if (score >= 15) return 'rg-risk-critical';
-    if (score >= 10) return 'rg-risk-high';
-    if (score >= 6) return 'rg-risk-medium';
-    return 'rg-risk-low';
-  };
-
-  const getControlRatingColor = (rating: number) => {
-    if (rating >= 0.8) return 'rg-control-high';
-    if (rating >= 0.5) return 'rg-control-medium';
-    if (rating >= 0.2) return 'rg-control-low';
-    return 'rg-control-none';
-  };
-
-  // Format duration in human-readable format (days, months, years)
-  const formatDuration = (days: number) => {
-    const absDays = Math.abs(days);
-    
-    if (absDays >= 365) {
-      const years = Math.floor(absDays / 365);
-      const remainingDays = absDays % 365;
-      const months = Math.floor(remainingDays / 30);
-      
-      if (months > 0) {
-        return `${years} year${years > 1 ? 's' : ''}, ${months} month${months > 1 ? 's' : ''}`;
-      }
-      return `${years} year${years > 1 ? 's' : ''}`;
-    } else if (absDays >= 30) {
-      const months = Math.floor(absDays / 30);
-      const remainingDays = absDays % 30;
-      
-      if (remainingDays > 0) {
-        return `${months} month${months > 1 ? 's' : ''}, ${remainingDays} day${remainingDays > 1 ? 's' : ''}`;
-      }
-      return `${months} month${months > 1 ? 's' : ''}`;
-    } else {
-      return `${absDays} day${absDays > 1 ? 's' : ''}`;
-    }
-  };
-
-  // Overdue risk calculation utility
-  const getDueStatus = (dueDate: string | null | undefined) => {
-    if (!dueDate) {
-      return { status: 'no-date', statusText: '-', color: 'text-gray-400', daysDiff: null, dateFormatted: null };
-    }
-
-    const today = new Date();
-    const due = new Date(dueDate);
-    const diffTime = due.getTime() - today.getTime();
-    const daysDiff = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    const dateFormatted = due.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-
-    if (daysDiff < 0) {
-      // Overdue
-      return { 
-        status: 'overdue', 
-        statusText: `Overdue\n${formatDuration(daysDiff)}`, 
-        color: 'text-red-600 font-medium', 
-        daysDiff: daysDiff,
-        dateFormatted: dateFormatted
-      };
-    } else if (daysDiff <= 7) {
-      // Due soon (within 7 days)
-      return { 
-        status: 'due-soon', 
-        statusText: daysDiff === 0 ? 'Due Today' : `Due in ${daysDiff} days`, 
-        color: 'text-amber-600 font-medium', 
-        daysDiff: daysDiff,
-        dateFormatted: dateFormatted
-      };
-    } else {
-      // On track
-      return { 
-        status: 'on-track', 
-        statusText: `Due in ${formatDuration(daysDiff)}`, 
-        color: 'text-emerald-600', 
-        daysDiff: daysDiff,
-        dateFormatted: dateFormatted
-      };
-    }
-  };
-
-  // Filter risks based on current filters
-  const filteredRisks = risks.filter(risk => {
-    // Search filter (title, description, comments)
-    if (filters.search && ![
-      risk.title?.toLowerCase(),
-      risk.description?.toLowerCase(), 
-      risk.comments?.toLowerCase()
-    ].some(field => field?.includes(filters.search.toLowerCase()))) {
-      return false;
-    }
-
-    // Status filter
-    if (filters.status !== 'all') {
-      const dueStatus = getDueStatus(risk.due_date);
-      if (filters.status !== dueStatus.status) {
-        return false;
-      }
-    }
-
-    // Risk Level filter (residual risk)
-    if (filters.riskLevel !== 'all') {
-      const residualScore = (risk.residual_likelihood || 0) * (risk.residual_impact || 0);
-      const riskLevel = getRiskLevelFromScore(residualScore);
-      if (filters.riskLevel !== riskLevel.name.toLowerCase()) {
-        return false;
-      }
-    }
-
-    // Department filter
-    if (filters.department !== 'all') {
-      if (filters.department !== risk.department_id) {
-        return false;
-      }
-    }
-
-    // Project filter
-    if (filters.project !== 'all') {
-      if (filters.project === 'no-project') {
-        if (risk.project_id !== null) {
-          return false;
-        }
-      } else {
-        if (filters.project !== risk.project_id) {
-          return false;
-        }
-      }
-    }
-
-    return true;
-  });
-
-  // Handle filter changes
-  const handleFilterChange = (key: string, value: string) => {
-    setFilters(prev => ({ ...prev, [key]: value }));
-  };
-
-  // Quick filter functions
-  const applyQuickFilter = (filterType: string) => {
-    switch (filterType) {
-      case 'overdue':
-        setFilters(prev => ({ ...prev, status: 'overdue' }));
-        break;
-      case 'high-risk':
-        setFilters(prev => ({ ...prev, riskLevel: 'high' }));
-        break;
-      case 'no-controls':
-        // This would need additional logic based on control_name presence
-        break;
-      case 'clear':
-        setFilters({ search: '', status: 'all', riskLevel: 'all', department: 'all', project: 'all' });
-        break;
-      default:
-        break;
-    }
-  };
-
-  const getResidualRiskColor = (score: number) => {
-    if (score >= 15) return 'rg-risk-critical';
-    if (score >= 10) return 'rg-risk-high';
-    if (score >= 6) return 'rg-risk-medium';
-    return 'rg-risk-low';
-  };
+  }, [risks, userPermissions]);
 
   if (loading) {
     return (
@@ -650,304 +669,362 @@ const RiskRegister: React.FC<RiskRegisterProps> = ({ onBack, selectedProjectId, 
     );
   }
 
-  return (
-    <div>
-      <main className="max-w-7xl mx-auto py-8 px-6">
-        <div className="flex justify-between items-center mb-8">
-          <div>
-            <div className="flex items-center space-x-4">
-              <div>
-                <h1 className="rg-header-title">
-                  Risk Register
-                  {selectedProjectName && (
-                    <span className="text-blue-600"> - {selectedProjectName}</span>
-                  )}
-                </h1>
-                <p className="rg-header-subtitle">
-                  {selectedProjectName 
-                    ? `Managing risks for ${selectedProjectName} project`
-                    : 'Comprehensive risk identification and management'
-                  }
-                </p>
-              </div>
-              {selectedProjectName && onClearProject && (
-                <button
-                  onClick={onClearProject}
-                  className="rg-btn rg-btn-secondary text-sm"
-                  title="View all risks"
-                >
-                  <i className="fas fa-times mr-2"></i>
-                  Clear Filter
-                </button>
-              )}
-            </div>
+  if (error) {
+    return (
+      <div className="min-h-screen rg-theme flex items-center justify-center">
+        <div className="text-center">
+          <div className="text-red-600 mb-4">
+            <svg className="w-16 h-16 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.732-.833-2.5 0L3.314 16.5c-.77.833.192 2.5 1.732 2.5z" />
+            </svg>
           </div>
-          <div className="flex space-x-3">
-            <button
-              onClick={() => {
-                setEditingRisk(null);
-                resetForm();
-                setShowModal(true);
-              }}
-              className="rg-btn rg-btn-primary"
-            >
+          <h3 className="text-lg font-medium text-red-600 mb-2">Error Loading Risk Register</h3>
+          <p className="text-red-500 mb-4">{error}</p>
+          <button onClick={loadData} className="rg-btn rg-btn-primary">Try Again</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen rg-theme">
+      <main className="max-w-7xl mx-auto py-8 px-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="rg-header-title">Risk Register</h2>
+            <p className="rg-header-subtitle">Comprehensive risk identification and management</p>
+            {selectedProjectName && (
+              <div className="flex items-center space-x-2 mt-2">
+                <span className="text-sm text-blue-600">Filtered by project: {selectedProjectName}</span>
+                {onClearProject && (
+                  <button onClick={onClearProject} className="text-sm text-gray-500 hover:text-gray-700">
+                    Clear filter
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+          <div className="flex items-center space-x-4">
+            {canEditRiskLocal('') && (
+              <button
+                onClick={() => {
+                  setEditingRisk(null);
+                  setFormData({
+                    title: '',
+                    description: '',
+                    category: '',
+                    department_id: '',
+                    inherent_likelihood: 3,
+                    inherent_impact: 3,
+                    control_name: '',
+                    control_rating: 0,
+                    due_date: '',
+                    comments: '',
+                    project_id: selectedProjectId || ''
+                  });
+                  setShowRiskForm(true);
+                }}
+                className="inline-flex items-center px-4 py-2 bg-gradient-to-r from-slate-700 to-slate-800 text-white text-sm font-semibold rounded-lg shadow-md hover:from-slate-800 hover:to-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-500 focus:ring-offset-2 transition-all duration-200 transform hover:scale-105"
+              >
+                <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                </svg>
+                Add New Risk
+              </button>
+            )}
+            <button onClick={onBack} className="rg-btn rg-btn-secondary">
               <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
               </svg>
-              Add New Risk
+              Back
             </button>
           </div>
         </div>
 
         {/* Collapsible Filters Section */}
-        <div className="rg-card mb-3">
-          <div className="rg-card-header" style={{cursor: 'pointer', padding: '0.75rem 1rem'}} onClick={() => setFiltersCollapsed(!filtersCollapsed)}>
-            <div className="d-flex justify-content-between align-items-center">
-              <h3 className="rg-card-title mb-0" style={{fontSize: '1rem'}}>Filters</h3>
-              <div className="d-flex align-items-center">
-                <small className="text-muted mr-3" style={{fontSize: '0.8rem'}}>
-                  Showing {filteredRisks.length} of {risks.length} risks
-                </small>
-                <i className={`fas ${filtersCollapsed ? 'fa-chevron-down' : 'fa-chevron-up'}`}></i>
-              </div>
+        <div className="rg-card mb-4">
+          <div 
+            className="rg-card-header cursor-pointer hover:bg-gray-50 transition-colors"
+            onClick={() => setFiltersCollapsed(!filtersCollapsed)}
+          >
+            <div className="flex items-center justify-between w-full">
+              <h3 className="rg-card-title flex items-center">
+                <svg 
+                  className={`w-5 h-5 mr-2 transition-transform duration-200 ${
+                    filtersCollapsed ? 'rotate-0' : 'rotate-90'
+                  }`} 
+                  fill="none" 
+                  stroke="currentColor" 
+                  viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
+                Filters
+              </h3>
+              <div className="text-sm text-gray-600">Showing {filteredRisks.length} of {risks.length} risks</div>
             </div>
           </div>
           {!filtersCollapsed && (
-            <div className="rg-card-body py-2">
-              <div className="row">
-                {/* Search Bar */}
-                <div className="col-md-3 mb-2">
-                  <input
-                    type="text"
-                    className="form-control form-control-sm"
-                    placeholder="Search risks..."
+            <div className="rg-card-body">
+              <div className="grid grid-cols-1 md:grid-cols-4 lg:grid-cols-6 gap-4 mb-4">
+                <div>
+                  <input 
+                    type="text" 
+                    placeholder="Search risks..." 
+                    className="form-control"
                     value={filters.search}
-                    onChange={(e) => handleFilterChange('search', e.target.value)}
+                    onChange={(e) => setFilters({ ...filters, search: e.target.value })}
                   />
                 </div>
-                
-                {/* Status Filter */}
-                <div className="col-md-2 mb-2">
-                  <select
-                    className="form-control form-control-sm"
+                <div>
+                  <select 
+                    className="form-control"
                     value={filters.status}
-                    onChange={(e) => handleFilterChange('status', e.target.value)}
+                    onChange={(e) => setFilters({ ...filters, status: e.target.value })}
                   >
-                    <option value="all">All Status</option>
+                    <option value="">All Status</option>
                     <option value="overdue">Overdue</option>
                     <option value="due-soon">Due Soon</option>
                     <option value="on-track">On Track</option>
                     <option value="no-date">No Date</option>
                   </select>
                 </div>
-                
-                {/* Risk Level Filter */}
-                <div className="col-md-2 mb-2">
-                  <select
-                    className="form-control form-control-sm"
+                <div>
+                  <select 
+                    className="form-control"
                     value={filters.riskLevel}
-                    onChange={(e) => handleFilterChange('riskLevel', e.target.value)}
+                    onChange={(e) => setFilters({ ...filters, riskLevel: e.target.value })}
                   >
-                    <option value="all">All Risk Levels</option>
-                    <option value="low">Low</option>
-                    <option value="medium">Medium</option>
-                    <option value="high">High</option>
-                    <option value="critical">Critical</option>
+                    <option value="">All Risk Levels</option>
+                    <option value="Low">Low</option>
+                    <option value="Medium">Medium</option>
+                    <option value="High">High</option>
+                    <option value="Critical">Critical</option>
                   </select>
                 </div>
-                
-                {/* Department Filter */}
-                <div className="col-md-2 mb-2">
-                  <select
-                    className="form-control form-control-sm"
+                <div>
+                  <select 
+                    className="form-control"
                     value={filters.department}
-                    onChange={(e) => handleFilterChange('department', e.target.value)}
+                    onChange={(e) => setFilters({ ...filters, department: e.target.value })}
                   >
-                    <option value="all">All Departments</option>
-                    {departments.map(dept => (
+                    <option value="">All Departments</option>
+                    {departments.map((dept) => (
                       <option key={dept.id} value={dept.id}>{dept.name}</option>
                     ))}
                   </select>
                 </div>
-                
-                <div className="col-md-2 mb-2">
-                  <select
-                    className="form-control form-control-sm"
-                    value={filters.project}
-                    onChange={(e) => handleFilterChange('project', e.target.value)}
+                <div>
+                  <select 
+                    className="form-control"
+                    value={selectedProjectId || filters.project}
+                    onChange={(e) => {
+                      // Clear selectedProjectId when using dropdown
+                      if (onClearProject && selectedProjectId) {
+                        onClearProject();
+                      }
+                      setFilters({ ...filters, project: e.target.value });
+                    }}
                   >
-                    <option value="all">All Projects</option>
-                    {projects.map(project => (
+                    <option value="">All Projects</option>
+                    {projects.map((project) => (
                       <option key={project.id} value={project.id}>{project.name}</option>
                     ))}
                     <option value="no-project">No Project</option>
                   </select>
                 </div>
-                
-                {/* Clear Filter Button */}
-                <div className="col-md-1 mb-2 d-flex align-items-end">
-                  <button
-                    type="button"
-                    className="btn btn-sm btn-secondary"
-                    onClick={() => applyQuickFilter('clear')}
+                <div>
+                  <button 
+                    onClick={clearFilters}
+                    className="btn btn-outline-secondary w-full"
                   >
                     Clear All
                   </button>
                 </div>
               </div>
-              
-              {/* Active Filters Summary */}
-              {(filters.search || filters.status !== 'all' || filters.riskLevel !== 'all' || filters.department !== 'all') && (
-                <div className="row mt-2">
-                  <div className="col-12">
-                    <small className="text-muted">
-                      Active filters:
-                      {filters.search && ` Search: "${filters.search}"`}
-                      {filters.status !== 'all' && ` | Status: ${filters.status}`}
-                      {filters.riskLevel !== 'all' && ` | Risk Level: ${filters.riskLevel}`}
-                      {filters.department !== 'all' && ` | Department: ${departments.find(d => d.id === filters.department)?.name || filters.department}`}
-                    </small>
-                  </div>
-                </div>
-              )}
             </div>
           )}
         </div>
 
-        {/* Risk Table */}
-        <div className="rg-card">
-          <div className="rg-card-body p-0">
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+          <div className="overflow-x-auto">
             {filteredRisks.length > 0 ? (
-              <div className="table-responsive" style={{overflowX: 'auto'}}>
-                <table className="table table-striped table-hover mb-0" style={{minWidth: '1600px', width: '1600px', fontSize: '0.8rem'}}>
-                  <thead className="sticky top-0 z-30">
-                    <tr style={{
-                      backgroundColor: '#4b5563',
-                      borderBottom: '1px solid #374151'
-                    }}>
-                      <th className="sticky left-0 z-40 text-white" style={{
-                        minWidth: '100px', 
-                        padding: '8px', 
-                        textAlign: 'left',
-                        backgroundColor: '#4b5563',
-                        borderRight: '1px solid #374151',
-                        fontWeight: '600'
-                      }}>Risk ID</th>
-                      <th className="text-white" style={{minWidth: '200px', padding: '8px', textAlign: 'left', fontWeight: '600'}}>Risk Title</th>
-                      <th className="text-white" style={{minWidth: '300px', padding: '8px', textAlign: 'left', fontWeight: '600'}}>Risk Description</th>
-                      <th className="text-white" style={{minWidth: '150px', padding: '8px', textAlign: 'left', fontWeight: '600'}}>Project</th>
-                      <th className="text-center text-white" style={{minWidth: '120px', padding: '8px', fontWeight: '600'}}>Inherent Risk</th>
-                      <th className="text-white" style={{minWidth: '150px', padding: '8px', textAlign: 'left', fontWeight: '600'}}>Department</th>
-                      <th className="text-white" style={{minWidth: '150px', padding: '8px', textAlign: 'left', fontWeight: '600'}}>Control</th>
-                      <th className="text-center text-white" style={{minWidth: '120px', padding: '8px', fontWeight: '600'}}>Control Rating</th>
-                      <th className="text-center text-white" style={{minWidth: '110px', padding: '8px', fontWeight: '600'}}>Due Date</th>
-                      <th className="text-center text-white" style={{minWidth: '180px', padding: '8px', fontWeight: '600'}}>Status</th>
-                      <th className="text-white" style={{minWidth: '200px', padding: '8px', textAlign: 'left', fontWeight: '600'}}>Comments</th>
-                      <th className="text-center text-white" style={{minWidth: '120px', padding: '8px', fontWeight: '600'}}>Residual Risk</th>
-                      <th className="text-center text-white" style={{minWidth: '150px', padding: '8px', fontWeight: '600'}}>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredRisks.map((risk) => {
-                    const inherentRisk = risk.inherent_likelihood * risk.inherent_impact;
-                    const inherentLevel = getRiskLevelFromScore(inherentRisk);
-                    const residualScore = (risk.residual_likelihood || 0) * (risk.residual_impact || 0);
-                    const residualLevel = getRiskLevelFromScore(residualScore);
-                    
-                    // Debug logging for the residual risk display
-                    if ((risk.control_rating || 0) > 0) {
-                      console.log(`Risk ${risk.risk_id} display values:`, {
-                        inherent: { likelihood: risk.inherent_likelihood, impact: risk.inherent_impact, score: inherentRisk },
-                        residual_from_db: risk.residual_score,
-                        residual_calculated: (risk.residual_likelihood || 0) * (risk.residual_impact || 0),
-                        residual_likelihood: risk.residual_likelihood,
-                        residual_impact: risk.residual_impact,
-                        final_residual_score: residualScore,
-                        residual_level: residualLevel.name,
-                        control_rating: risk.control_rating
-                      });
+              <table className="w-full" style={{ minWidth: '1200px' }}>
+                <thead>
+                  <tr className="bg-gradient-to-r from-slate-800 to-slate-700 text-white">
+                    <th className="px-6 py-2 text-left text-sm font-semibold uppercase tracking-wider border-r border-slate-600 last:border-r-0">Risk ID</th>
+                    <th className="px-6 py-2 text-left text-sm font-semibold uppercase tracking-wider border-r border-slate-600 last:border-r-0">Risk Title</th>
+                    <th className="px-6 py-2 text-left text-sm font-semibold uppercase tracking-wider border-r border-slate-600 last:border-r-0">Description</th>
+                    <th className="px-6 py-2 text-left text-sm font-semibold uppercase tracking-wider border-r border-slate-600 last:border-r-0">Project</th>
+                    <th className="px-6 py-2 text-left text-sm font-semibold uppercase tracking-wider border-r border-slate-600 last:border-r-0">Inherent Risk</th>
+                    <th className="px-6 py-2 text-left text-sm font-semibold uppercase tracking-wider border-r border-slate-600 last:border-r-0">Department</th>
+                    <th className="px-6 py-2 text-left text-sm font-semibold uppercase tracking-wider border-r border-slate-600 last:border-r-0">Control</th>
+                    <th className="px-6 py-2 text-left text-sm font-semibold uppercase tracking-wider border-r border-slate-600 last:border-r-0">Control Rating</th>
+                    <th className="px-6 py-2 text-left text-sm font-semibold uppercase tracking-wider border-r border-slate-600 last:border-r-0">Due Date</th>
+                    <th className="px-6 py-2 text-left text-sm font-semibold uppercase tracking-wider border-r border-slate-600 last:border-r-0">Status</th>
+                    <th className="px-6 py-2 text-left text-sm font-semibold uppercase tracking-wider border-r border-slate-600 last:border-r-0">Comments</th>
+                    <th className="px-6 py-2 text-left text-sm font-semibold uppercase tracking-wider border-r border-slate-600 last:border-r-0">Residual Risk</th>
+                    <th className="px-6 py-2 text-left text-sm font-semibold uppercase tracking-wider">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {filteredRisks.map((risk, index) => {
+                    if (index === 0) {
+                      console.log('🎯 RENDERING RISKS:', filteredRisks.length, 'filtered risks');
+                      console.log('🎯 FILTERED RISKS FOR RENDER:', filteredRisks.map(r => ({ id: r.risk_id, project_id: r.project_id })));
                     }
-                                        return (
-                        <tr key={risk.risk_id} className={`${Math.floor(filteredRisks.indexOf(risk) / 1) % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`} style={{borderBottom: '1px solid #e5e7eb'}}>
-                        <td className={`sticky left-0 z-10 rg-text-primary font-medium ${Math.floor(filteredRisks.indexOf(risk) / 1) % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`} style={{padding: '8px'}}>
-                          {risk.risk_id}
-                        </td>
-                        <td className="rg-text-primary font-medium" style={{padding: '8px'}}>{risk.title}</td>
-                        <td className="rg-text-secondary truncate" title={risk.description} style={{padding: '8px', maxWidth: '300px'}}>
-                          {risk.description || 'No description'}
-                        </td>
-                        <td className="rg-text-secondary" style={{padding: '8px'}}>{risk.project_name}</td>
-                        <td className="text-center" style={{padding: '8px'}}>
-                          <span className={`rg-risk-badge ${inherentLevel.color}`}>
-                            {inherentLevel.name}
-                          </span>
-                        </td>
-                        <td className="rg-text-secondary" style={{padding: '8px'}}>{risk.department_name || 'Unknown'}</td>
-                        <td className="rg-text-secondary" style={{padding: '8px'}}>{risk.control_name || 'No Control'}</td>
-                        <td className="text-center" style={{padding: '8px'}}>
-                          <span className={`badge ${getControlRatingColor(risk.control_rating || 0)}`}>
-                            {((risk.control_rating || 0) * 100).toFixed(0)}%
-                          </span>
-                        </td>
-                        <td className="text-center rg-text-secondary" style={{padding: '8px'}}>
-                          {risk.due_date ? new Date(risk.due_date).toLocaleDateString() : 'Not set'}
-                        </td>
-                        <td className="text-center" style={{padding: '8px'}}>
+                    return (
+                    <tr key={risk.id} className={`hover:bg-gray-50 transition-colors duration-150 ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50/30'}`}>
+                      <td className="px-6 py-4 whitespace-nowrap border-r border-gray-200 last:border-r-0">
+                        <span className="font-mono text-sm font-medium text-slate-900">{risk.risk_id}</span>
+                      </td>
+                      <td className="px-6 py-4 border-r border-gray-200 last:border-r-0">
+                        <div className="font-semibold text-slate-900 leading-tight">{risk.title}</div>
+                      </td>
+                      <td className="px-6 py-4 border-r border-gray-200 last:border-r-0">
+                        <div className="max-w-xs text-sm text-slate-600 leading-relaxed" title={risk.description}>
+                          {risk.description}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap border-r border-gray-200 last:border-r-0">
+                        <span className="text-sm text-slate-600">{risk.project_name || '—'}</span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap border-r border-gray-200 last:border-r-0">
+                        <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium shadow-sm ${
+                          calculateRiskLevel(risk.inherent_likelihood, risk.inherent_impact) === 'Critical' ? 'bg-red-50 text-red-700 ring-1 ring-red-600/20' :
+                          calculateRiskLevel(risk.inherent_likelihood, risk.inherent_impact) === 'High' ? 'bg-orange-50 text-orange-700 ring-1 ring-orange-600/20' :
+                          calculateRiskLevel(risk.inherent_likelihood, risk.inherent_impact) === 'Medium' ? 'bg-yellow-50 text-yellow-700 ring-1 ring-yellow-600/20' :
+                          'bg-green-50 text-green-700 ring-1 ring-green-600/20'
+                        }`}>
+                          {calculateRiskLevel(risk.inherent_likelihood, risk.inherent_impact)}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap border-r border-gray-200 last:border-r-0">
+                        <span className="text-sm font-medium text-slate-700">{risk.department_name}</span>
+                      </td>
+                      <td className="px-6 py-4 border-r border-gray-200 last:border-r-0">
+                        <span className="text-sm text-slate-600">{risk.control_name || '—'}</span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap border-r border-gray-200 last:border-r-0">
+                        <span className="text-sm text-slate-600">
                           {(() => {
-                            const dueStatus = getDueStatus(risk.due_date);
-                            return (
-                              <div className={`text-xs ${dueStatus.color}`} style={{whiteSpace: 'pre-line'}}>
-                                {dueStatus.statusText}
-                              </div>
-                            );
+                            const rating = risk.control_rating ? Math.round(risk.control_rating * 100) : 0;
+                            switch(rating) {
+                              case 0: return '0%';
+                              case 20: return '20%';
+                              case 40: return '40%';
+                              case 60: return '60%';
+                              case 80: return '80%';
+                              case 95: return '95%';
+                              default: return `${rating}%`;
+                            }
                           })()}
-                        </td>
-                        <td className="rg-text-secondary truncate" title={risk.comments} style={{padding: '8px', maxWidth: '200px'}}>
-                          {risk.comments || 'No comments'}
-                        </td>
-                        <td className="text-center" style={{padding: '8px'}}>
-                          <span className={`rg-risk-badge ${residualLevel.color}`}>
-                            {residualLevel.name}
-                          </span>
-                        </td>
-                        <td className="text-center" style={{padding: '8px'}}>
-                          <button
-                            className="btn btn-sm btn-outline-primary mr-2"
-                            onClick={() => {
-                              setEditingRisk(risk);
-                              setFormData({
-                                title: risk.title,
-                                description: risk.description,
-                                category: risk.category_id,
-                                department_id: risk.department_id,
-                                inherent_likelihood: risk.inherent_likelihood,
-                                inherent_impact: risk.inherent_impact,
-                                control_name: risk.control_name,
-                                control_rating: risk.control_rating,
-                                due_date: risk.due_date,
-                                comments: risk.comments,
-                                priority: risk.priority,
-                                identified_date: risk.identified_date
-                              });
-                              setShowModal(true);
-                            }}
-                          >
-                            <i className="fas fa-edit"></i>
-                          </button>
-                        </td>
-                      </tr>
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap border-r border-gray-200 last:border-r-0">
+                        <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium shadow-sm ${
+                          getDueDateStatus(risk.due_date || null) === 'overdue' ? 'bg-red-50 text-red-700 ring-1 ring-red-600/20' :
+                          getDueDateStatus(risk.due_date || null) === 'due-soon' ? 'bg-yellow-50 text-yellow-700 ring-1 ring-yellow-600/20' :
+                          getDueDateStatus(risk.due_date || null) === 'on-track' ? 'bg-green-50 text-green-700 ring-1 ring-green-600/20' :
+                          'bg-gray-50 text-gray-700 ring-1 ring-gray-600/20'
+                        }`}>
+                          {risk.due_date || 'No Date'}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap border-r border-gray-200 last:border-r-0">
+                        <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-blue-50 text-blue-700 ring-1 ring-blue-600/20 shadow-sm">
+                          {risk.status || 'Identified'}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 border-r border-gray-200 last:border-r-0">
+                        <div className="max-w-xs text-sm text-slate-600 leading-relaxed" title={risk.comments || ''}>
+                          {risk.comments || '—'}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap border-r border-gray-200 last:border-r-0">
+                        <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium shadow-sm ${
+                          risk.residual_risk === 'Critical' ? 'bg-red-50 text-red-700 ring-1 ring-red-600/20' :
+                          risk.residual_risk === 'High' ? 'bg-orange-50 text-orange-700 ring-1 ring-orange-600/20' :
+                          risk.residual_risk === 'Medium' ? 'bg-yellow-50 text-yellow-700 ring-1 ring-yellow-600/20' :
+                          'bg-green-50 text-green-700 ring-1 ring-green-600/20'
+                        }`}>
+                          {risk.residual_risk || 'Medium'}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center space-x-2">
+                          {canEditRiskLocal(risk.department_id || '') && (
+                            <button 
+                              onClick={() => handleEdit(risk)}
+                              className="inline-flex items-center justify-center w-8 h-8 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-full transition-all duration-200" 
+                              title="Edit Risk"
+                            >
+                              <i className="fas fa-edit text-sm"></i>
+                            </button>
+                          )}
+                          {canManageControlsLocal(risk.department_id || '') && !canEditRiskLocal(risk.department_id || '') && (
+                            <button 
+                              onClick={() => handleManageControl(risk)}
+                              className="inline-flex items-center justify-center w-8 h-8 text-slate-400 hover:text-green-600 hover:bg-green-50 rounded-full transition-all duration-200" 
+                              title="Manage Control"
+                            >
+                              <i className="fas fa-cogs text-sm"></i>
+                            </button>
+                          )}
+                          {canEditRiskLocal(risk.department_id || '') && (
+                            <button 
+                              onClick={() => handleDelete(risk)}
+                              className="inline-flex items-center justify-center w-8 h-8 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-all duration-200" 
+                              title="Delete Risk"
+                            >
+                              <i className="fas fa-trash text-sm"></i>
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
                     );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+                  })}
+                </tbody>
+              </table>
             ) : (
-              <div className="rg-empty-state py-12">
-                <svg className="w-16 h-16 mx-auto mb-4 rg-text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <div className="text-center py-12">
+                <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                 </svg>
-                <h3 className="text-lg font-medium rg-text-primary mb-2">No risks registered</h3>
-                <p className="rg-text-secondary">Start by creating your first risk assessment.</p>
+                <h3 className="mt-4 text-lg font-medium text-gray-900">No risks found</h3>
+                <p className="mt-2 text-sm text-gray-500">
+                  {filters.search || filters.status || filters.riskLevel || filters.department || filters.project 
+                    ? 'Try adjusting your filters to see more results.' 
+                    : 'Get started by creating your first risk.'}
+                </p>
+                {canEditRiskLocal('') && !filters.search && !filters.status && !filters.riskLevel && !filters.department && !filters.project && (
+                  <button
+                    onClick={() => {
+                      setEditingRisk(null);
+                      setFormData({
+                        title: '',
+                        description: '',
+                        category: '',
+                        department_id: '',
+                        inherent_likelihood: 3,
+                        inherent_impact: 3,
+                        control_name: '',
+                        control_rating: 0,
+                        due_date: '',
+                        comments: '',
+                        project_id: selectedProjectId || ''
+                      });
+                      setShowRiskForm(true);
+                    }}
+                    className="mt-4 inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700"
+                  >
+                    <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                    </svg>
+                    Add New Risk
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -955,203 +1032,321 @@ const RiskRegister: React.FC<RiskRegisterProps> = ({ onBack, selectedProjectId, 
       </main>
 
       {/* Risk Form Modal */}
-      {showModal && (
-        <div className="rg-modal-backdrop fixed inset-0 flex items-center justify-center z-50">
-          <div className="rg-modal-content w-full max-w-2xl mx-4">
-            <div className="rg-modal-header">
-              <h2 className="text-xl font-bold rg-text-primary">
+      {showRiskForm && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl p-8 w-full max-w-4xl mx-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-2xl font-bold text-gray-900">
                 {editingRisk ? 'Edit Risk' : 'Create New Risk'}
               </h2>
               <button
                 onClick={() => {
-                  setShowModal(false);
-                  resetForm();
+                  setShowRiskForm(false);
+                  setFormData({
+                    title: '',
+                    description: '',
+                    category: '',
+                    department_id: '',
+                    inherent_likelihood: 3,
+                    inherent_impact: 3,
+                    control_name: '',
+                    control_rating: 0,
+                    due_date: '',
+                    comments: '',
+                    project_id: ''
+                  });
+                  setEditingRisk(null);
                 }}
-                className="rg-text-muted hover:rg-text-primary text-2xl font-bold"
+                className="text-gray-400 hover:text-gray-600 text-2xl font-bold"
               >
                 ×
               </button>
             </div>
 
-            <div className="rg-modal-body">
-              <form onSubmit={handleSubmit} className="space-y-6">
+            <form onSubmit={handleSubmit} className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
-                  <label className="rg-form-label">Risk Title</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Risk Title *</label>
                   <input
                     type="text"
                     required
                     value={formData.title}
                     onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                    className="rg-form-control"
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     placeholder="Enter risk title..."
                   />
                 </div>
 
                 <div>
-                  <label className="rg-form-label">Risk Category</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Risk Category *</label>
                   <select
                     required
                     value={formData.category}
                     onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                    className="rg-form-control"
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   >
                     <option value="">Select category...</option>
-                    {categories.map(category => (
-                      <option key={category.id} value={category.id}>
-                        {category.name}
+                    {categories.map((cat) => (
+                      <option key={cat.id} value={cat.id}>{cat.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Risk Description *</label>
+                <textarea
+                  required
+                  rows={4}
+                  value={formData.description}
+                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  placeholder="Describe the risk in detail..."
+                />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Assign to Department *</label>
+                  <select
+                    required
+                    value={formData.department_id}
+                    onChange={(e) => setFormData({ ...formData, department_id: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  >
+                    <option value="">Select department...</option>
+                    {departments.map((dept) => (
+                      <option key={dept.id} value={dept.id}>
+                        {dept.name}
                       </option>
                     ))}
                   </select>
                 </div>
 
                 <div>
-                  <label className="rg-form-label">Risk Description</label>
-                  <textarea
-                    required
-                    rows={4}
-                    value={formData.description}
-                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                    className="rg-form-textarea"
-                    placeholder="Describe the risk in detail..."
-                  />
-                </div>
-
-                <div>
-                  <label className="rg-form-label">Assign to Department</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Project (Optional)</label>
                   <select
-                    required
-                    value={formData.department_id}
-                    onChange={(e) => setFormData({ ...formData, department_id: e.target.value })}
-                    className="rg-form-control"
+                    value={formData.project_id}
+                    onChange={(e) => setFormData({ ...formData, project_id: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   >
-                    <option value="">Select department...</option>
-                    {departments && departments.length > 0 ? departments.map((dept) => (
-                      <option key={dept.id} value={dept.id}>
-                        {dept.name}
+                    <option value="">No project...</option>
+                    {projects.map((project) => (
+                      <option key={project.id} value={project.id}>
+                        {project.name}
                       </option>
-                    )) : (
-                      <option value="" disabled>Loading departments...</option>
-                    )}
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Inherent Likelihood (1-5)</label>
+                  <select
+                    value={formData.inherent_likelihood}
+                    onChange={(e) => setFormData({ ...formData, inherent_likelihood: parseInt(e.target.value) })}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  >
+                    <option value={1}>1 - Very Low</option>
+                    <option value={2}>2 - Low</option>
+                    <option value={3}>3 - Medium</option>
+                    <option value={4}>4 - High</option>
+                    <option value={5}>5 - Very High</option>
                   </select>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div>
-                    <label className="rg-form-label">Inherent Likelihood (1-{riskMatrix?.matrix_size || 5})</label>
-                    <select
-                      value={formData.inherent_likelihood}
-                      onChange={(e) => setFormData({ ...formData, inherent_likelihood: parseInt(e.target.value) })}
-                      className="rg-form-control"
-                    >
-                      {Array.from({ length: riskMatrix?.matrix_size || 5 }, (_, i) => {
-                        const value = i + 1;
-                        const likelihoodLabel = riskMatrix?.likelihood_labels?.[i] || `Level ${value}`;
-                        // Only show label if it's different from the number
-                        const displayText = likelihoodLabel === String(value) ? value : `${value} - ${likelihoodLabel}`;
-                        return (
-                          <option key={value} value={value}>
-                            {displayText}
-                          </option>
-                        );
-                      })}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="rg-form-label">Inherent Impact (1-{riskMatrix?.matrix_size || 5})</label>
-                    <select
-                      value={formData.inherent_impact}
-                      onChange={(e) => setFormData({ ...formData, inherent_impact: parseInt(e.target.value) })}
-                      className="rg-form-control"
-                    >
-                      {Array.from({ length: riskMatrix?.matrix_size || 5 }, (_, i) => {
-                        const value = i + 1;
-                        const impactLabel = riskMatrix?.impact_labels?.[i] || `Level ${value}`;
-                        // Only show label if it's different from the number
-                        const displayText = impactLabel === String(value) ? value : `${value} - ${impactLabel}`;
-                        return (
-                          <option key={value} value={value}>
-                            {displayText}
-                          </option>
-                        );
-                      })}
-                    </select>
-                  </div>
-                </div>
-
                 <div>
-                  <label className="rg-form-label">Control</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Inherent Impact (1-5)</label>
+                  <select
+                    value={formData.inherent_impact}
+                    onChange={(e) => setFormData({ ...formData, inherent_impact: parseInt(e.target.value) })}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  >
+                    <option value={1}>1 - Minimal</option>
+                    <option value={2}>2 - Minor</option>
+                    <option value={3}>3 - Moderate</option>
+                    <option value={4}>4 - Major</option>
+                    <option value={5}>5 - Severe</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Control Name (Optional)</label>
                   <input
                     type="text"
                     value={formData.control_name}
                     onChange={(e) => setFormData({ ...formData, control_name: e.target.value })}
-                    className="rg-form-control"
-                    placeholder="Enter control name (optional)..."
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    placeholder="Enter control name..."
                   />
                 </div>
 
                 <div>
-                  <label className="rg-form-label">Control Effectiveness</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Control Effectiveness</label>
                   <select
                     value={formData.control_rating}
-                    onChange={(e) => setFormData({ ...formData, control_rating: parseFloat(e.target.value) })}
-                    className="rg-form-control"
+                    onChange={(e) => setFormData({ ...formData, control_rating: parseInt(e.target.value) })}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   >
                     <option value={0}>0% - No Control (No control in place)</option>
-                    <option value={0.2}>20% - Weak Control (Basic/informal controls)</option>
-                    <option value={0.4}>40% - Adequate Control (Documented procedures)</option>
-                    <option value={0.6}>60% - Good Control (Monitored & tested)</option>
-                    <option value={0.8}>80% - Strong Control (Automated/integrated)</option>
-                    <option value={0.95}>95% - Excellent Control (Fail-safe/redundant)</option>
+                    <option value={20}>20% - Weak Control (Basic/informal controls)</option>
+                    <option value={40}>40% - Adequate Control (Documented procedures)</option>
+                    <option value={60}>60% - Good Control (Monitored & tested)</option>
+                    <option value={80}>80% - Strong Control (Automated/integrated)</option>
+                    <option value={95}>95% - Excellent Control (Fail-safe/redundant)</option>
                   </select>
                 </div>
+              </div>
 
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
-                  <label className="rg-form-label">Control Implementation Due Date</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Due Date (Optional)</label>
                   <input
                     type="date"
-                    value={formData.due_date || ''}
+                    value={formData.due_date}
                     onChange={(e) => setFormData({ ...formData, due_date: e.target.value })}
-                    className="rg-form-control"
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   />
                 </div>
 
                 <div>
-                  <label className="rg-form-label">Comments</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Comments (Optional)</label>
                   <textarea
                     rows={3}
-                    value={formData.comments || ''}
+                    value={formData.comments}
                     onChange={(e) => setFormData({ ...formData, comments: e.target.value })}
-                    className="rg-form-textarea"
-                    placeholder="Additional notes or comments about this risk..."
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    placeholder="Additional comments..."
                   />
                 </div>
-              </form>
-            </div>
+              </div>
 
-            <div className="rg-modal-footer">
-              <div className="flex justify-end space-x-4">
+              {/* Evidence Review Section for Risk Team Users */}
+              {editingRisk && canViewEvidenceLocal() && (
+                <div className="mt-8 pt-6 border-t border-gray-200">
+                  <h3 className="text-lg font-semibold text-gray-900 mb-4">Control Evidence Review</h3>
+                  {evidence.length > 0 ? (
+                    <div className="space-y-3">
+                      {evidence.map((item: any) => (
+                        <div key={item.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+                          <div className="flex-1">
+                            <div className="flex items-center space-x-3">
+                              <i className="fas fa-file-alt text-blue-500"></i>
+                              <div>
+                                <p className="font-medium text-gray-900">{item.file_name}</p>
+                                <p className="text-sm text-gray-500">
+                                  Uploaded: {new Date(item.uploaded_at).toLocaleDateString()} | 
+                                  Size: {(item.file_size / 1024 / 1024).toFixed(2)} MB |
+                                  Status: <span className={`px-2 py-1 rounded-full text-xs ${
+                                    item.review_status === 'approved' ? 'bg-green-100 text-green-800' :
+                                    item.review_status === 'rejected' ? 'bg-red-100 text-red-800' :
+                                    'bg-yellow-100 text-yellow-800'
+                                  }`}>
+                                    {item.review_status}
+                                  </span>
+                                </p>
+                                {item.control_description && (
+                                  <p className="text-sm text-gray-600 mt-1">
+                                    Control: {item.control_description}
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <button
+                              onClick={() => downloadEvidence(item.file_path, item.file_name)}
+                              className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+                            >
+                              <i className="fas fa-download mr-1"></i> Download
+                            </button>
+                            {user?.role === 'admin' && (
+                              <>
+                                <select
+                                  value={item.review_status}
+                                  onChange={async (e) => {
+                                    try {
+                                      await supabase
+                                        .from('control_evidence')
+                                        .update({ 
+                                          review_status: e.target.value,
+                                          review_date: new Date().toISOString()
+                                        })
+                                        .eq('id', item.id);
+                                      loadEvidence(editingRisk.id);
+                                    } catch (error) {
+                                      console.error('Error updating review status:', error);
+                                    }
+                                  }}
+                                  className="px-2 py-1 text-sm border border-gray-300 rounded"
+                                >
+                                  <option value="pending">Pending</option>
+                                  <option value="approved">Approved</option>
+                                  <option value="rejected">Rejected</option>
+                                </select>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-gray-500 italic">No evidence files uploaded for this risk.</p>
+                  )}
+                </div>
+              )}
+
+              <div className="flex justify-end space-x-4 pt-6 border-t">
                 <button
                   type="button"
                   onClick={() => {
-                    setShowModal(false);
-                    resetForm();
+                    setShowRiskForm(false);
+                    setFormData({
+                      title: '',
+                      description: '',
+                      category: '',
+                      department_id: '',
+                      inherent_likelihood: 3,
+                      inherent_impact: 3,
+                      control_name: '',
+                      control_rating: 0,
+                      due_date: '',
+                      comments: '',
+                      project_id: ''
+                    });
+                    setEditingRisk(null);
                   }}
-                  className="rg-btn rg-btn-secondary"
+                  className="px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
                 >
                   Cancel
                 </button>
                 <button
-                  onClick={handleSubmit}
-                  className="rg-btn rg-btn-primary"
+                  type="submit"
+                  className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
                 >
                   {editingRisk ? 'Update Risk' : 'Create Risk'}
                 </button>
               </div>
-            </div>
+            </form>
           </div>
         </div>
       )}
+
+      {/* Control Management Modal */}
+      <ControlManagement
+        risk={selectedRiskForControl}
+        isOpen={showControlManagement}
+        onClose={() => {
+          setShowControlManagement(false);
+          setSelectedRiskForControl(null);
+        }}
+        onSave={() => {
+          loadData(); // Refresh the risk data when control is saved
+        }}
+      />
     </div>
   );
 };

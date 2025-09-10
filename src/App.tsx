@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from './lib/supabase';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { AdminProvider } from './contexts/AdminContext';
+import { UserProvider } from './contexts/UserContext';
 import { Auth } from './components/Auth/Auth';
 import { PasswordChange } from './components/Auth/PasswordChange';
 import RiskMatrix from './components/RiskMatrix/RiskMatrix';
@@ -57,9 +58,11 @@ const AppContent: React.FC = () => {
   };
 
   const handleNavigateToRiskRegister = (projectId: string, projectName: string) => {
+    console.log('🚀 App.tsx - Navigating to risk register:', { projectId, projectName });
     setSelectedProjectId(projectId);
     setSelectedProjectName(projectName);
     setCurrentView('risk-register');
+    console.log('✅ App.tsx - State set:', { selectedProjectId: projectId, selectedProjectName: projectName });
   };
 
   // Risk Register State (hooks moved to top of function)
@@ -420,9 +423,11 @@ const AppContent: React.FC = () => {
 const App: React.FC = () => {
   return (
     <AuthProvider>
-      <AdminProvider>
-        <AppContent />
-      </AdminProvider>
+      <UserProvider>
+        <AdminProvider>
+          <AppContent />
+        </AdminProvider>
+      </UserProvider>
     </AuthProvider>
   );
 };
