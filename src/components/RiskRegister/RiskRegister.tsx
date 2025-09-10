@@ -224,7 +224,7 @@ const RiskRegister: React.FC<RiskRegisterProps> = ({ onBack, selectedProjectId, 
       // Load risks with explicit column selection (no auto-joins to avoid PGRST201)
       const { data: riskData, error: riskError } = await supabase
         .from('risks')
-        .select('id, organization_id, risk_id, title, description, department_id, category_id, inherent_likelihood, inherent_impact, residual_likelihood, residual_impact, control_id, control_name, control_rating, due_date, comments, project_id, created_at, updated_at')
+        .select('id, organization_id, risk_id, title, description, department_id, category_id, inherent_likelihood, inherent_impact, residual_likelihood, residual_impact, due_date, comments, project_id, created_at, updated_at')
         .eq('organization_id', '00000000-0000-0000-0000-000000000000')
         .order('created_at', { ascending: false });
 
@@ -269,7 +269,9 @@ const RiskRegister: React.FC<RiskRegisterProps> = ({ onBack, selectedProjectId, 
           residual_score: residualScore,
           department_name: department?.name || 'Unknown',
           category_name: category?.name || 'Uncategorized',
-          project_name: project?.name || null
+          project_name: project?.name || null,
+          control_name: undefined, // Column doesn't exist in database
+          control_rating: undefined // Will be handled separately if needed
         };
       }) || [];
 
